@@ -4,6 +4,7 @@ export interface RuntimeResetChecks {
   panRoot: boolean;
   shakeRoot: boolean;
   teacher: boolean;
+  sceneRoots: boolean;
 }
 
 export interface TuningPanel {
@@ -134,8 +135,8 @@ function updatePanel(
 
 function updateResetChecks(panel: HTMLElement, checks: RuntimeResetChecks): void {
   const value = getOutput(panel, 'reset-check-value');
-  const allPassed = checks.panRoot && checks.shakeRoot && checks.teacher;
-  value.value = allPassed ? 'PASS · panRoot · shakeRoot · Teacher' : 'pending';
+  const allPassed = checks.panRoot && checks.shakeRoot && checks.teacher && checks.sceneRoots;
+  value.value = allPassed ? 'PASS · scene roots · panRoot · shakeRoot · Teacher' : 'pending';
   value.className = allPassed ? 'is-passed' : '';
 }
 

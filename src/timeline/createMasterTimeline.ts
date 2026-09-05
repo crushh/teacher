@@ -1,15 +1,16 @@
 import { gsap } from 'gsap';
 
-import type { Scene } from '../scenes/Scene';
+import type { GsapTimeline } from '../scenes/Scene';
 
-export function createMasterTimeline(scenes: readonly Scene[]): gsap.core.Timeline {
+export function createMasterTimeline(timelines: readonly GsapTimeline[]): gsap.core.Timeline {
   const masterTimeline = gsap.timeline({
     id: 'masterTimeline',
     paused: true,
+    repeat: -1,
   });
 
-  scenes.forEach((scene) => {
-    masterTimeline.add(scene.createTimeline());
+  timelines.forEach((timeline) => {
+    masterTimeline.add(timeline);
   });
 
   return masterTimeline;

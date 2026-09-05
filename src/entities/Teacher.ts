@@ -7,6 +7,8 @@ export interface TeacherResetStatus {
   visual: boolean;
 }
 
+export type TeacherPose = 'idle' | 'talk' | 'run' | 'jump' | 'fall' | 'roll' | 'catch' | 'holdBook' | 'openDoor';
+
 type Position = {
   x: number;
   y: number;
@@ -28,13 +30,15 @@ export class Teacher {
   readonly visual = new Container({ label: 'Teacher.visual' });
 
   private readonly placeholder: Graphics;
-  private readonly initialRootPosition: Position = {
+  private readonly initialRootPosition: Position;
+  private readonly initialVisualPosition: Position = { x: 0, y: 0 };
+  private pose: TeacherPose = 'idle';
+
+  constructor(initialPosition: Position = {
     x: RUNTIME_CONFIG.teacher.startX,
     y: RUNTIME_CONFIG.teacher.startY,
-  };
-  private readonly initialVisualPosition: Position = { x: 0, y: 0 };
-
-  constructor() {
+  }) {
+    this.initialRootPosition = { ...initialPosition };
     this.placeholder = this.createPlaceholder();
     this.root.addChild(this.visual);
     this.visual.addChild(this.placeholder);
@@ -45,6 +49,16 @@ export class Teacher {
     this.resetContainer(this.root, this.initialRootPosition);
     this.resetContainer(this.visual, this.initialVisualPosition);
     this.resetContainer(this.placeholder, { x: 0, y: 0 });
+    this.pose = 'idle';
+  }
+
+  setPose(pose: TeacherPose): void {
+    this.pose = pose;
+    this.placeholder.tint = poseTint(pose);
+  }
+
+  getPose(): TeacherPose {
+    return this.pose;
   }
 
   getResetStatus(): TeacherResetStatus {
@@ -128,6 +142,30 @@ export class Teacher {
       container.visible &&
       container.tint === 0xffffff
     );
+  }
+}
+
+function poseTint(pose: TeacherPose): number {
+  switch (pose) {
+    case 'talk':
+      return 0xffffff;
+    case 'run':
+      return 0x9bd7ff;
+    case 'jump':
+      return 0xffe09a;
+    case 'fall':
+      return 0xffa6b8;
+    case 'roll':
+      return 0xd6b4ff;
+    case 'catch':
+      return 0x9ff0ce;
+    case 'holdBook':
+      return 0xf8f0a3;
+    case 'openDoor':
+      return 0xffd28a;
+    case 'idle':
+    default:
+      return 0xffffff;
   }
 }
 

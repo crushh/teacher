@@ -1,4 +1,4 @@
-type GsapTimeline = ReturnType<typeof import('gsap').gsap.timeline>;
+import type { GsapTimeline } from '../scenes/Scene';
 
 export type PlaybackState =
   | 'loading'
@@ -29,7 +29,7 @@ interface PlaybackControllerOptions {
 }
 
 export class PlaybackController {
-  private readonly createTimeline: () => gsap.core.Timeline;
+  private readonly createTimeline: () => GsapTimeline;
   private readonly resetRuntime: () => void;
   private readonly minSpeed: number;
   private readonly maxSpeed: number;
