@@ -1,5 +1,6 @@
-import { Container, Graphics } from 'pixi.js';
+import { Container, Graphics, Sprite } from 'pixi.js';
 
+import type { ClassroomPoseTextures } from '../assets/classroomAssets';
 import { RUNTIME_CONFIG } from '../game/config';
 
 export interface TeacherResetStatus {
@@ -7,7 +8,25 @@ export interface TeacherResetStatus {
   visual: boolean;
 }
 
-export type TeacherPose = 'idle' | 'talk' | 'run' | 'jump' | 'fall' | 'roll' | 'catch' | 'holdBook' | 'openDoor';
+export type TeacherPose =
+  | 'idle'
+  | 'talk'
+  | 'talk1'
+  | 'talk2'
+  | 'walkBook'
+  | 'putBook'
+  | 'blackboard'
+  | 'lookClock'
+  | 'react'
+  | 'run'
+  | 'run1'
+  | 'run2'
+  | 'jump'
+  | 'fall'
+  | 'roll'
+  | 'catch'
+  | 'holdBook'
+  | 'openDoor';
 
 type Position = {
   x: number;
@@ -30,18 +49,34 @@ export class Teacher {
   readonly visual = new Container({ label: 'Teacher.visual' });
 
   private readonly placeholder: Graphics;
+  private readonly poseSprite: Sprite | undefined;
+  private readonly poseTextures: ClassroomPoseTextures | undefined;
   private readonly initialRootPosition: Position;
   private readonly initialVisualPosition: Position = { x: 0, y: 0 };
   private pose: TeacherPose = 'idle';
 
-  constructor(initialPosition: Position = {
-    x: RUNTIME_CONFIG.teacher.startX,
-    y: RUNTIME_CONFIG.teacher.startY,
-  }) {
+  constructor(
+    initialPosition: Position = {
+      x: RUNTIME_CONFIG.teacher.startX,
+      y: RUNTIME_CONFIG.teacher.startY,
+    },
+    poseTextures?: ClassroomPoseTextures,
+  ) {
     this.initialRootPosition = { ...initialPosition };
+    this.poseTextures = poseTextures;
     this.placeholder = this.createPlaceholder();
     this.root.addChild(this.visual);
-    this.visual.addChild(this.placeholder);
+    if (poseTextures) {
+      this.poseSprite = new Sprite(poseTextures.talk1);
+      this.poseSprite.label = 'Teacher.poseSprite';
+      this.poseSprite.anchor.set(0.5, 1);
+      this.poseSprite.scale.set(0.68);
+      this.visual.addChild(this.poseSprite, this.placeholder);
+      this.placeholder.visible = false;
+    } else {
+      this.poseSprite = undefined;
+      this.visual.addChild(this.placeholder);
+    }
     this.reset();
   }
 
@@ -50,10 +85,28 @@ export class Teacher {
     this.resetContainer(this.visual, this.initialVisualPosition);
     this.resetContainer(this.placeholder, { x: 0, y: 0 });
     this.pose = 'idle';
+    if (this.poseSprite) {
+      this.poseSprite.texture = this.poseTextures?.talk1 ?? this.poseSprite.texture;
+      this.poseSprite.position.set(0, 0);
+      this.poseSprite.rotation = 0;
+      this.poseSprite.scale.set(0.68);
+      this.poseSprite.alpha = 1;
+      this.poseSprite.visible = true;
+      this.placeholder.visible = false;
+    }
   }
 
   setPose(pose: TeacherPose): void {
     this.pose = pose;
+    const texture = this.poseTextures?.[poseTextureKey(pose)];
+    if (this.poseSprite && texture) {
+      this.poseSprite.texture = texture;
+      this.poseSprite.visible = true;
+      this.placeholder.visible = false;
+      return;
+    }
+
+    this.placeholder.visible = true;
     this.placeholder.tint = poseTint(pose);
   }
 
@@ -71,7 +124,11 @@ export class Teacher {
   isReset(): boolean {
     const status = this.getResetStatus();
 
-    return status.root && status.visual && this.isContainerAt(this.placeholder, { x: 0, y: 0 });
+    const poseSpriteReset = this.poseSprite
+      ? this.poseSprite.visible && nearlyEqual(this.poseSprite.x, 0) && nearlyEqual(this.poseSprite.y, 0)
+      : this.isContainerAt(this.placeholder, { x: 0, y: 0 });
+
+    return status.root && status.visual && poseSpriteReset;
   }
 
   private createPlaceholder(): Graphics {
@@ -166,6 +223,42 @@ function poseTint(pose: TeacherPose): number {
     case 'idle':
     default:
       return 0xffffff;
+  }
+}
+
+function poseTextureKey(pose: TeacherPose): keyof ClassroomPoseTextures {
+  switch (pose) {
+    case 'walkBook':
+    case 'holdBook':
+      return 'walkBook';
+    case 'putBook':
+      return 'putBook';
+    case 'talk':
+    case 'talk1':
+    case 'idle':
+    case 'openDoor':
+      return 'talk1';
+    case 'talk2':
+      return 'talk2';
+    case 'blackboard':
+      return 'blackboard';
+    case 'lookClock':
+      return 'lookClock';
+    case 'react':
+      return 'react';
+    case 'run':
+    case 'run1':
+    case 'roll':
+      return 'run1';
+    case 'run2':
+      return 'run2';
+    case 'jump':
+    case 'fall':
+      return 'jump';
+    case 'catch':
+      return 'talk2';
+    default:
+      return 'talk1';
   }
 }
 

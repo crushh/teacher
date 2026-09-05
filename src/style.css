@@ -36,6 +36,37 @@ body {
   min-height: 100svh;
 }
 
+.dialogue-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 4;
+  width: min(560px, calc(100% - 36px));
+  padding: 10px 14px 11px;
+  border: 2px solid #f6f0d7;
+  border-radius: 3px;
+  background: rgba(13, 22, 34, 0.94);
+  box-shadow: 4px 4px 0 rgba(7, 11, 17, 0.8);
+  color: #f6f0d7;
+  font: 700 14px/1.35 monospace;
+  pointer-events: none;
+  transform: translateX(-50%);
+  opacity: 0;
+  visibility: hidden;
+}
+
+.dialogue-overlay__speaker {
+  display: block;
+  margin-bottom: 3px;
+  color: #ffc857;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.dialogue-overlay__text {
+  display: block;
+}
+
 .pixel-canvas {
   display: block;
   max-width: 100vw;

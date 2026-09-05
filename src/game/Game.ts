@@ -1,6 +1,7 @@
 import { Application, Container } from 'pixi.js';
 import { gsap } from 'gsap';
 
+import { loadClassroomAssets, type ClassroomAssets } from '../assets/classroomAssets';
 import { createTuningPanel, type RuntimeResetChecks, type TuningPanel } from '../dev/createTuningPanel';
 import { Teacher } from '../entities/Teacher';
 import { ClassroomScene } from '../scenes/ClassroomScene';
@@ -44,11 +45,12 @@ export class Game {
     this.shakeRoot.addChild(this.sceneHost);
 
     this.mount.replaceChildren(app.canvas);
-    this.createMovieRuntime();
     this.setCanvasMetadata();
 
     window.addEventListener('resize', this.handleResize, { passive: true });
     window.visualViewport?.addEventListener('resize', this.handleResize, { passive: true });
+    const classroomAssets = await loadClassroomAssets();
+    this.createMovieRuntime(classroomAssets);
     this.resize();
   }
 
@@ -75,12 +77,12 @@ export class Game {
     }
   }
 
-  private createMovieRuntime(): void {
+  private createMovieRuntime(classroomAssets: ClassroomAssets): void {
     const teacher = new Teacher({
       x: MOVIE_CONFIG.teacher.startX,
       y: MOVIE_CONFIG.teacher.startY,
-    });
-    const classroomScene = new ClassroomScene(teacher, this.sceneHost);
+    }, classroomAssets.teacher);
+    const classroomScene = new ClassroomScene(teacher, this.sceneHost, classroomAssets.environment, this.mount);
     const cityScene = new CityScene(teacher, this.panRoot, this.shakeRoot, this.sceneHost);
     const hallwayScene = new HallwayScene(teacher, this.shakeRoot, this.sceneHost);
     classroomScene.build();

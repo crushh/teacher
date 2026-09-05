@@ -1,52 +1,84 @@
 import { gsap } from 'gsap';
-import { Container, Graphics, Text } from 'pixi.js';
+import { Container, Graphics, Sprite, Text } from 'pixi.js';
+import type { Texture } from 'pixi.js';
 
+import type { ClassroomEnvironmentTextures } from '../assets/classroomAssets';
 import { jumpTo } from '../animations/jump';
 import { GAME_HEIGHT, GAME_WIDTH, MOVIE_CONFIG } from '../game/config';
 import { Teacher } from '../entities/Teacher';
+import { createDialogueOverlay, type DialogueOverlay } from '../ui/DialogueOverlay';
 import type { Scene, GsapTimeline } from './Scene';
 
 const COLORS = {
-  wall: 0xf0d9b5,
-  wallShadow: 0xd6b98e,
-  floor: 0x8b604b,
   desk: 0x5d3c36,
   deskTop: 0x8f5e43,
-  board: 0x294c4b,
-  boardText: 0xd9edc2,
-  window: 0x7cc7e6,
-  frame: 0x68483d,
   ink: 0x2b2030,
   accent: 0xffc857,
-  speed: 0xfff0b5,
+  clock: 0xf6f0d7,
+  clockHand: 0x2b2030,
 } as const;
 
 type StudentState = 'sleeping' | 'phone' | 'laptop' | 'daydream' | 'listening';
+
+interface DialogueOptions {
+  readonly at: number;
+  readonly endAt: number;
+  readonly speaker: string;
+  readonly text: string;
+  readonly label: string;
+}
 
 export class ClassroomScene implements Scene {
   readonly id = 'classroom';
   readonly root = new Container({ label: 'ClassroomScene.root' });
 
   private readonly teacher: Teacher;
-  private readonly speedLines = new Graphics();
+  private readonly environmentTextures: ClassroomEnvironmentTextures;
+  private readonly dialogue: DialogueOverlay | undefined;
+  private readonly backgroundLayer = new Container({ label: 'backgroundLayer' });
+  private readonly deskLayer = new Container({ label: 'deskLayer' });
+  private readonly grayboxStudents: Container;
+  private readonly grayboxDesks: Container;
+  private readonly speedLines = new Graphics({ label: 'classroomSpeedLines' });
+  private readonly bellIndicator = new Container({ label: 'bellIndicator' });
+  private doorOpenBg: Sprite | undefined;
+  private doorClosedBg: Sprite | undefined;
+  private deskEmpty: Sprite | undefined;
+  private deskWithBooks: Sprite | undefined;
   private activeTimeline: GsapTimeline | undefined;
   private context: gsap.Context | undefined;
   private built = false;
 
-  constructor(teacher: Teacher, sceneHost: Container) {
+  constructor(
+    teacher: Teacher,
+    sceneHost: Container,
+    environmentTextures: ClassroomEnvironmentTextures,
+    dialogueHost?: HTMLElement,
+  ) {
     this.teacher = teacher;
+    this.environmentTextures = environmentTextures;
+    this.dialogue = dialogueHost ? createDialogueOverlay(dialogueHost) : undefined;
+    this.grayboxStudents = this.createStudents();
+    this.grayboxStudents.label = 'studentsBack.graybox';
+    this.grayboxStudents.visible = false;
+    this.grayboxDesks = this.createDesks();
+    this.grayboxDesks.label = 'teacherDeskFront.graybox';
+    this.grayboxDesks.visible = false;
     sceneHost.addChild(this.root);
   }
 
   build(): void {
     if (this.built) return;
 
-    this.root.addChild(this.createBackground());
-    this.root.addChild(this.createBlackboard());
-    this.root.addChild(this.createWindow());
-    this.root.addChild(this.createStudents());
-    this.root.addChild(this.createDesks());
+    this.createEnvironmentLayers();
+    this.root.addChild(this.backgroundLayer);
+    this.root.addChild(this.createClock());
+    this.root.addChild(this.grayboxStudents);
+    this.root.addChild(this.grayboxDesks);
+    this.root.addChild(this.deskLayer);
     this.root.addChild(this.createTeacherMark());
+    this.createBellIndicator();
+    this.root.addChild(this.bellIndicator);
     this.root.addChild(this.speedLines);
     this.built = true;
     this.reset();
@@ -55,6 +87,7 @@ export class ClassroomScene implements Scene {
   createTimeline(): GsapTimeline {
     if (!this.built) this.build();
 
+    this.activeTimeline?.kill();
     this.context?.revert();
 
     let timeline: GsapTimeline | undefined;
@@ -64,13 +97,174 @@ export class ClassroomScene implements Scene {
         defaults: { overwrite: 'auto' },
       });
 
-      const classroomEntranceTL = this.createClassroomEntranceTL();
-      const classroomTeachingTL = this.createClassroomTeachingTL();
-      const classroomEscapeTL = this.createClassroomEscapeTL();
+      const classroom = MOVIE_CONFIG.classroom;
+      const classroomTimeline = timeline;
+      if (!this.doorOpenBg || !this.doorClosedBg || !this.deskEmpty || !this.deskWithBooks) {
+        throw new Error('Classroom environment sprites were not created.');
+      }
+      const doorOpenBg = this.doorOpenBg;
+      const doorClosedBg = this.doorClosedBg;
+      const deskEmpty = this.deskEmpty;
+      const deskWithBooks = this.deskWithBooks;
+      const putBookEndAt = classroom.entranceDuration + classroom.putBookDuration;
+      const blackboardEndAt = classroom.blackboardAt + classroom.blackboardDuration;
 
-      timeline.add(classroomEntranceTL, 0);
-      timeline.add(classroomTeachingTL, MOVIE_CONFIG.classroom.entranceDuration);
-      timeline.add(classroomEscapeTL, MOVIE_CONFIG.classroom.runStartAt);
+      classroomTimeline.addLabel('classroom:start', 0);
+      classroomTimeline.set(this.root, { visible: true, alpha: 1 }, 0);
+      classroomTimeline.set(doorOpenBg, { visible: true }, 0);
+      classroomTimeline.set(doorClosedBg, { visible: false }, 0);
+      classroomTimeline.set(deskEmpty, { visible: true }, 0);
+      classroomTimeline.set(deskWithBooks, { visible: false }, 0);
+      classroomTimeline.set(this.speedLines, { visible: true, alpha: 0 }, 0);
+      classroomTimeline.set(this.bellIndicator, {
+        visible: false,
+        alpha: 0,
+      }, 0);
+      classroomTimeline.set(this.bellIndicator.scale, { x: 1, y: 1 }, 0);
+      classroomTimeline.set(this.teacher.visual, {
+        x: 0,
+        y: 0,
+        rotation: 0,
+      }, 0);
+      classroomTimeline.set(this.teacher.visual.scale, {
+        x: classroom.teacherScale,
+        y: classroom.teacherScale,
+      }, 0);
+      classroomTimeline.set(this.teacher.root, {
+        x: classroom.offscreenLeft,
+        y: classroom.teacherGroundY,
+        visible: false,
+        alpha: 1,
+        rotation: 0,
+      }, 0);
+      classroomTimeline.set(this.teacher.root.scale, { x: 1, y: 1 }, 0);
+      classroomTimeline.set(this.teacher.root, { visible: true }, 0);
+      classroomTimeline.call(() => this.teacher.setPose('walkBook'), [], 0);
+      classroomTimeline.addLabel('teacher:enter', 0);
+      classroomTimeline.to(this.teacher.root, {
+        x: classroom.teachingX,
+        duration: classroom.entranceDuration,
+        ease: 'power1.out',
+      }, 0);
+      classroomTimeline.to(this.teacher.visual, {
+        y: -2,
+        duration: classroom.talkFrameDuration / 1.5,
+        ease: 'sine.inOut',
+        repeat: 3,
+        yoyo: true,
+      }, 0);
+
+      classroomTimeline.addLabel('teacher:inside', classroom.entranceDuration);
+      classroomTimeline.addLabel('door:close', 'teacher:inside');
+      classroomTimeline.set(doorOpenBg, { visible: false }, 'door:close');
+      classroomTimeline.set(doorClosedBg, { visible: true }, 'door:close');
+
+      classroomTimeline.call(() => this.teacher.setPose('putBook'), [], classroom.entranceDuration);
+      classroomTimeline.addLabel('teacher:putBook', classroom.entranceDuration);
+      classroomTimeline.addLabel('teacher:approachDesk', classroom.entranceDuration);
+      classroomTimeline.addLabel('book:release', putBookEndAt);
+      classroomTimeline.set(deskEmpty, { visible: false }, 'book:release');
+      classroomTimeline.set(deskWithBooks, { visible: true }, 'book:release');
+      classroomTimeline.set(this.teacher.visual, { y: 0 }, putBookEndAt);
+      classroomTimeline.call(() => this.teacher.setPose('talk1'), [], classroom.lessonStartAt);
+      classroomTimeline.addLabel('lesson:start', classroom.lessonStartAt);
+      this.addTalkPoseSwitches(classroomTimeline, classroom.lessonStartAt, classroom.blackboardAt);
+      this.addDialogue(classroomTimeline, {
+        at: classroom.dialogueLanguageAt,
+        endAt: classroom.dialogueLanguageEndAt,
+        speaker: 'TEACHER',
+        text: '中国語と日本語は違います！',
+        label: 'dialogue:language',
+      });
+
+      classroomTimeline.call(() => this.teacher.setPose('blackboard'), [], classroom.blackboardAt);
+      classroomTimeline.addLabel('board:look', classroom.blackboardAt);
+      classroomTimeline.set(this.teacher.visual, { y: 0, rotation: 0 }, classroom.blackboardAt);
+      classroomTimeline.call(() => this.teacher.setPose('talk1'), [], Math.max(classroom.talkResumeAt, blackboardEndAt));
+      classroomTimeline.addLabel('lesson:resume', classroom.talkResumeAt);
+      this.addTalkPoseSwitches(classroomTimeline, classroom.talkResumeAt, classroom.lookClockAt);
+
+      classroomTimeline.call(() => this.teacher.setPose('lookClock'), [], classroom.lookClockAt);
+      classroomTimeline.addLabel('clock:look', classroom.lookClockAt);
+      this.addDialogue(classroomTimeline, {
+        at: classroom.dialogueEndClassAt,
+        endAt: classroom.dialogueEndClassEndAt,
+        speaker: 'TEACHER',
+        text: 'あ、もうこんな時間です…。',
+        label: 'dialogue:endClass',
+      });
+
+      classroomTimeline.addLabel('bell', classroom.bellAt);
+      classroomTimeline.call(() => this.triggerBell(), [], classroom.bellAt);
+      classroomTimeline.call(() => this.teacher.setPose('react'), [], classroom.bellAt + 0.02);
+      classroomTimeline.to(this.bellIndicator, {
+        alpha: 1,
+        duration: 0.1,
+        ease: 'back.out(2)',
+      }, classroom.bellAt);
+      classroomTimeline.to(this.bellIndicator.scale, {
+        x: 1.12,
+        y: 1.12,
+        duration: 0.1,
+        ease: 'back.out(2)',
+      }, classroom.bellAt);
+      classroomTimeline.to(this.bellIndicator, {
+        alpha: 0,
+        duration: 0.26,
+        ease: 'power1.out',
+      }, classroom.bellAt + 0.1);
+      classroomTimeline.to(this.bellIndicator.scale, {
+        x: 1,
+        y: 1,
+        duration: 0.26,
+        ease: 'power1.out',
+      }, classroom.bellAt + 0.1);
+
+      classroomTimeline.addLabel('sprint:start', classroom.runStartAt);
+      this.addSprintPoseSwitches(classroomTimeline, classroom.runStartAt, classroom.windowJumpAt);
+      classroomTimeline.to(this.teacher.root, {
+        x: classroom.windowRunX,
+        duration: classroom.windowJumpAt - classroom.runStartAt,
+        ease: 'power2.in',
+      }, classroom.runStartAt);
+      classroomTimeline.to(this.teacher.visual, {
+        y: -3,
+        duration: classroom.sprintFrameDuration,
+        ease: 'sine.inOut',
+        repeat: 3,
+        yoyo: true,
+      }, classroom.runStartAt);
+
+      classroomTimeline.call(() => this.teacher.setPose('jump'), [], classroom.windowJumpAt);
+      classroomTimeline.addLabel('jump:start', classroom.windowJumpAt);
+      classroomTimeline.add(jumpTo({
+        target: this.teacher.root,
+        startX: classroom.windowRunX,
+        startY: classroom.teacherGroundY,
+        targetX: classroom.offscreenRight,
+        targetY: classroom.windowExitY,
+        height: classroom.jumpHeight,
+        duration: classroom.windowExitAt - classroom.windowJumpAt,
+      }), classroom.windowJumpAt);
+      classroomTimeline.to(this.teacher.visual, {
+        rotation: 0.08,
+        duration: 0.22,
+        ease: 'power1.out',
+      }, classroom.windowJumpAt);
+      classroomTimeline.set(this.speedLines, { visible: true }, classroom.windowJumpAt);
+      classroomTimeline.to(this.speedLines, {
+        alpha: 0.9,
+        duration: 0.08,
+        ease: 'none',
+      }, classroom.windowJumpAt);
+      classroomTimeline.to(this.speedLines, {
+        alpha: 0,
+        duration: 0.25,
+        ease: 'power1.out',
+      }, classroom.windowJumpAt + 0.25);
+      classroomTimeline.set(this.teacher.root, { visible: false }, classroom.windowExitAt);
+      classroomTimeline.set(this.teacher.visual.scale, { x: 1, y: 1 }, classroom.windowExitAt);
+      classroomTimeline.addLabel('classroom:end', classroom.windowExitAt);
     });
 
     if (!timeline) {
@@ -84,14 +278,36 @@ export class ClassroomScene implements Scene {
   reset(): void {
     this.resetContainer(this.root, true);
     this.resetContainer(this.speedLines, false);
+    this.resetContainer(this.bellIndicator, false);
+    if (this.doorOpenBg && this.doorClosedBg && this.deskEmpty && this.deskWithBooks) {
+      this.doorOpenBg.visible = true;
+      this.doorClosedBg.visible = false;
+      this.deskEmpty.visible = true;
+      this.deskWithBooks.visible = false;
+    }
+    this.grayboxStudents.visible = false;
+    this.grayboxDesks.visible = false;
+    this.dialogue?.reset();
     this.teacher.reset();
     this.resetTeacherForEntrance();
   }
 
   isTeacherReset(): boolean {
+    const classroom = MOVIE_CONFIG.classroom;
+    const environmentReset = Boolean(
+      this.doorOpenBg &&
+      this.doorClosedBg &&
+      this.deskEmpty &&
+      this.deskWithBooks &&
+      this.doorOpenBg.visible &&
+      !this.doorClosedBg.visible &&
+      this.deskEmpty.visible &&
+      !this.deskWithBooks.visible,
+    );
     return (
-      nearlyEqual(this.teacher.root.x, MOVIE_CONFIG.classroom.offscreenLeft) &&
-      nearlyEqual(this.teacher.root.y, MOVIE_CONFIG.classroom.entranceY) &&
+      environmentReset &&
+      nearlyEqual(this.teacher.root.x, classroom.offscreenLeft) &&
+      nearlyEqual(this.teacher.root.y, classroom.teacherGroundY) &&
       nearlyEqual(this.teacher.root.rotation, 0) &&
       nearlyEqual(this.teacher.root.scale.x, 1) &&
       nearlyEqual(this.teacher.root.scale.y, 1) &&
@@ -108,186 +324,119 @@ export class ClassroomScene implements Scene {
   dispose(): void {
     this.activeTimeline?.kill();
     this.context?.revert();
+    this.dialogue?.destroy();
     this.activeTimeline = undefined;
     this.context = undefined;
     this.root.removeChildren();
     this.built = false;
   }
 
-  private createClassroomEntranceTL(): GsapTimeline {
-    const timeline = gsap.timeline({
-      id: 'classroomEntranceTL',
-      defaults: { overwrite: 'auto' },
-    });
+  private addTalkPoseSwitches(timeline: GsapTimeline, startAt: number, endAt: number): void {
+    let frame = 1;
+    for (let at = startAt + MOVIE_CONFIG.classroom.talkFrameDuration; at < endAt; at += MOVIE_CONFIG.classroom.talkFrameDuration) {
+      const pose = frame % 2 === 1 ? 'talk2' : 'talk1';
+      timeline.call(() => this.teacher.setPose(pose), [], at);
+      frame += 1;
+    }
+  }
 
-    timeline.set(this.root, { visible: true, alpha: 1 }, 0);
-    timeline.set(this.speedLines, { visible: true, alpha: 0 }, 0);
-    timeline.set(this.teacher.root, {
-      x: MOVIE_CONFIG.classroom.offscreenLeft,
-      y: MOVIE_CONFIG.classroom.entranceY,
-      visible: false,
-      alpha: 1,
-    }, 0);
-    timeline.set(this.teacher.root, { visible: true }, 0);
-    timeline.call(() => this.teacher.setPose('run'), [], 0);
-    timeline.to(this.teacher.root, {
-      x: MOVIE_CONFIG.teacher.startX,
-      duration: MOVIE_CONFIG.classroom.entranceDuration,
+  private addSprintPoseSwitches(timeline: GsapTimeline, startAt: number, endAt: number): void {
+    timeline.call(() => this.teacher.setPose('run1'), [], startAt);
+    let frame = 1;
+    for (let at = startAt + MOVIE_CONFIG.classroom.sprintFrameDuration; at < endAt; at += MOVIE_CONFIG.classroom.sprintFrameDuration) {
+      const pose = frame % 2 === 1 ? 'run2' : 'run1';
+      timeline.call(() => this.teacher.setPose(pose), [], at);
+      frame += 1;
+    }
+  }
+
+  private addDialogue(timeline: GsapTimeline, options: DialogueOptions): void {
+    if (!this.dialogue) return;
+
+    timeline.addLabel(options.label, options.at);
+    timeline.call(() => this.dialogue?.setLine(options.speaker, options.text), [], options.at);
+    timeline.to(this.dialogue.root, {
+      autoAlpha: 1,
+      duration: 0.12,
       ease: 'power1.out',
-    }, 0);
-
-    return timeline;
+    }, options.at);
+    timeline.to(this.dialogue.root, {
+      autoAlpha: 0,
+      duration: 0.12,
+      ease: 'power1.in',
+    }, Math.max(options.at, options.endAt - 0.12));
   }
 
-  private createClassroomTeachingTL(): GsapTimeline {
-    const timeline = gsap.timeline({
-      id: 'classroomTeachingTL',
-      defaults: { overwrite: 'auto' },
-    });
-    const entranceDuration = MOVIE_CONFIG.classroom.entranceDuration;
-    const talkAt = Math.max(0, MOVIE_CONFIG.classroom.teacherTalkAt - entranceDuration);
-
-    timeline.call(() => this.teacher.setPose('talk'), [], talkAt);
-    timeline.to(this.teacher.visual, {
-      y: -3,
-      duration: 0.35,
-      ease: 'sine.inOut',
-      repeat: 7,
-      yoyo: true,
-    }, talkAt);
-    timeline.call(() => this.teacher.setPose('idle'), [], MOVIE_CONFIG.classroom.teacherPauseAt - entranceDuration);
-    timeline.to(this.teacher.visual, {
-      rotation: -0.14,
-      duration: 0.18,
-      ease: 'power2.out',
-    }, MOVIE_CONFIG.classroom.lookAtWindowAt - entranceDuration);
-
-    return timeline;
+  private triggerBell(): void {
+    this.bellIndicator.visible = true;
   }
 
-  private createClassroomEscapeTL(): GsapTimeline {
-    const timeline = gsap.timeline({
-      id: 'classroomEscapeTL',
-      defaults: { overwrite: 'auto' },
-    });
-    const jumpAt = MOVIE_CONFIG.classroom.windowJumpAt - MOVIE_CONFIG.classroom.runStartAt;
+  private createEnvironmentLayers(): void {
+    if (this.doorOpenBg || this.doorClosedBg || this.deskEmpty || this.deskWithBooks) return;
 
-    timeline.call(() => this.teacher.setPose('run'), [], 0);
-    timeline.to(this.teacher.visual, {
-      y: -5,
-      duration: 0.2,
-      ease: 'sine.inOut',
-      repeat: 3,
-      yoyo: true,
-    }, 0);
-    timeline.to(this.teacher.root, {
-      x: 510,
-      duration: jumpAt,
-      ease: 'power2.in',
-    }, 0);
-    timeline.call(() => this.teacher.setPose('jump'), [], jumpAt);
-    timeline.add(jumpTo({
-      target: this.teacher.root,
-      startX: 510,
-      startY: MOVIE_CONFIG.classroom.entranceY,
-      targetX: MOVIE_CONFIG.classroom.offscreenRight,
-      targetY: 150,
-      height: 38,
-      duration: MOVIE_CONFIG.classroom.windowExitAt - MOVIE_CONFIG.classroom.windowJumpAt,
-    }), jumpAt);
-    timeline.to(this.speedLines, {
-      alpha: 0.9,
-      duration: 0.08,
-      ease: 'none',
-    }, jumpAt);
-    timeline.to(this.speedLines, {
-      alpha: 0,
-      duration: 0.25,
-      ease: 'power1.out',
-    }, jumpAt + 0.25);
-
-    return timeline;
-  }
-
-  private resetTeacherForEntrance(): void {
-    this.teacher.root.position.set(
-      MOVIE_CONFIG.classroom.offscreenLeft,
-      MOVIE_CONFIG.classroom.entranceY,
+    const backgroundScale = Math.max(
+      GAME_WIDTH / Math.max(this.environmentTextures.doorOpen.width, this.environmentTextures.doorClosed.width),
+      GAME_HEIGHT / Math.max(this.environmentTextures.doorOpen.height, this.environmentTextures.doorClosed.height),
     );
-    this.teacher.root.rotation = 0;
-    this.teacher.root.scale.set(1, 1);
-    this.teacher.root.pivot.set(0, 0);
-    this.teacher.root.skew.set(0, 0);
-    this.teacher.root.alpha = 1;
-    this.teacher.root.visible = false;
+    this.doorOpenBg = this.createBackgroundSprite(
+      this.environmentTextures.doorOpen,
+      'doorOpenBg',
+      backgroundScale,
+    );
+    this.doorClosedBg = this.createBackgroundSprite(
+      this.environmentTextures.doorClosed,
+      'doorClosedBg',
+      backgroundScale,
+    );
+    this.doorClosedBg.visible = false;
+    this.backgroundLayer.addChild(this.doorOpenBg, this.doorClosedBg);
+
+    this.deskEmpty = this.createDeskSprite(
+      this.environmentTextures.deskEmpty,
+      'deskEmpty',
+    );
+    this.deskWithBooks = this.createDeskSprite(
+      this.environmentTextures.deskWithBooks,
+      'deskWithBooks',
+    );
+    this.deskWithBooks.visible = false;
+    this.deskLayer.addChild(this.deskEmpty, this.deskWithBooks);
   }
 
-  private createBackground(): Graphics {
-    return new Graphics()
-      .rect(0, 0, GAME_WIDTH, GAME_HEIGHT)
-      .fill(COLORS.wall)
-      .rect(0, 250, GAME_WIDTH, 110)
-      .fill(COLORS.floor)
-      .rect(0, 246, GAME_WIDTH, 5)
-      .fill(COLORS.wallShadow)
-      .rect(0, 308, GAME_WIDTH, 3)
-      .fill({ color: 0x4c3740, alpha: 0.35 });
+  private createBackgroundSprite(texture: Texture, label: string, scale: number): Sprite {
+    const background = new Sprite(texture);
+    background.label = label;
+    background.anchor.set(0.5);
+    background.scale.set(scale);
+    background.position.set(GAME_WIDTH / 2, GAME_HEIGHT / 2);
+    return background;
   }
 
-  private createBlackboard(): Graphics {
-    const board = new Graphics()
-      .roundRect(42, 52, 320, 112, 4)
-      .fill(COLORS.frame)
-      .roundRect(49, 59, 306, 98, 2)
-      .fill(COLORS.board);
-    board
-      .rect(74, 84, 68, 4)
-      .fill({ color: COLORS.boardText, alpha: 0.85 })
-      .rect(74, 101, 120, 3)
-      .fill({ color: COLORS.boardText, alpha: 0.55 })
-      .rect(74, 118, 90, 3)
-      .fill({ color: COLORS.boardText, alpha: 0.55 })
-      .circle(296, 93, 10)
-      .stroke({ color: COLORS.accent, width: 3 })
-      .moveTo(284, 126)
-      .lineTo(314, 126)
-      .stroke({ color: COLORS.boardText, width: 3 });
-    return board;
+  private createDeskSprite(texture: Texture, label: string): Sprite {
+    const desk = new Sprite(texture);
+    desk.label = label;
+    desk.anchor.set(0.5, 1);
+    desk.scale.set(0.16);
+    desk.position.set(GAME_WIDTH / 2, GAME_HEIGHT);
+    return desk;
   }
 
-  private createWindow(): Container {
-    const window = new Container({ label: 'classroomWindow' });
-    const outside = new Graphics()
-      .rect(500, 58, 112, 136)
-      .fill(COLORS.frame)
-      .rect(508, 66, 96, 120)
-      .fill(COLORS.window)
-      .rect(508, 144, 96, 42)
-      .fill(0x5a9dba)
-      .rect(520, 119, 22, 25)
-      .fill(0x536b83)
-      .rect(550, 100, 26, 44)
-      .fill(0x536b83)
-      .rect(579, 128, 18, 16)
-      .fill(0x536b83)
-      .rect(553, 66, 5, 120)
-      .fill(COLORS.frame)
-      .rect(508, 125, 96, 5)
-      .fill(COLORS.frame);
-    window.addChild(outside);
-
-    const sign = new Text({
-      text: 'WINDOW',
-      style: {
-        fill: COLORS.ink,
-        fontFamily: 'monospace',
-        fontSize: 8,
-        fontWeight: '700',
-      },
-    });
-    sign.position.set(513, 201);
-    window.addChild(sign);
-    return window;
+  private createClock(): Container {
+    const clock = new Container({ label: 'classroomClock' });
+    clock.position.set(470, 56);
+    clock.addChild(new Graphics()
+      .circle(0, 0, 17)
+      .fill(COLORS.clock)
+      .stroke({ color: COLORS.ink, width: 3 })
+      .circle(0, 0, 2)
+      .fill(COLORS.clockHand)
+      .moveTo(0, 0)
+      .lineTo(0, -10)
+      .moveTo(0, 0)
+      .lineTo(8, 5)
+      .stroke({ color: COLORS.clockHand, width: 2 }));
+    clock.addChild(this.createText('CLOCK', -17, 22, COLORS.ink));
+    return clock;
   }
 
   private createStudents(): Container {
@@ -357,6 +506,25 @@ export class ClassroomScene implements Scene {
     return this.createText('TEACHER  /  CLASSROOM', 42, 334, COLORS.accent);
   }
 
+  private createBellIndicator(): void {
+    this.bellIndicator.position.set(535, 38);
+    this.bellIndicator.addChild(new Graphics()
+      .roundRect(-20, -11, 40, 22, 3)
+      .fill({ color: COLORS.ink, alpha: 0.92 })
+      .stroke({ color: COLORS.accent, width: 2 }));
+    const label = new Text({
+      text: 'BELL!',
+      style: {
+        fill: COLORS.accent,
+        fontFamily: 'monospace',
+        fontSize: 9,
+        fontWeight: '700',
+      },
+    });
+    label.anchor.set(0.5);
+    this.bellIndicator.addChild(label);
+  }
+
   private createText(text: string, x: number, y: number, fill: number): Text {
     const label = new Text({
       text,
@@ -380,6 +548,17 @@ export class ClassroomScene implements Scene {
     container.alpha = visible ? 1 : 0;
     container.visible = visible;
     container.tint = 0xffffff;
+  }
+
+  private resetTeacherForEntrance(): void {
+    const classroom = MOVIE_CONFIG.classroom;
+    this.teacher.root.position.set(classroom.offscreenLeft, classroom.teacherGroundY);
+    this.teacher.root.rotation = 0;
+    this.teacher.root.scale.set(1, 1);
+    this.teacher.root.pivot.set(0, 0);
+    this.teacher.root.skew.set(0, 0);
+    this.teacher.root.alpha = 1;
+    this.teacher.root.visible = false;
   }
 }
 
