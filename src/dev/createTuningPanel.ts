@@ -1,4 +1,5 @@
 import type { PlaybackController, PlaybackSnapshot } from '../playback/PlaybackController';
+import type { CitySkyMode } from '../game/config';
 
 export interface RuntimeResetChecks {
   panRoot: boolean;
@@ -11,10 +12,16 @@ export interface TuningPanel {
   destroy(): void;
 }
 
+export interface SkyTuningControls {
+  getMode(): CitySkyMode;
+  setMode(mode: CitySkyMode): void;
+}
+
 export function createTuningPanel(
   parent: HTMLElement,
   controller: PlaybackController,
   getResetChecks: () => RuntimeResetChecks,
+  skyTuning: SkyTuningControls,
 ): TuningPanel {
   const panel = document.createElement('aside');
   panel.className = 'tuning-panel';
@@ -38,6 +45,18 @@ export function createTuningPanel(
       <input id="time-scale" data-testid="time-scale" type="range" min="0.25" max="2" step="0.25" value="1">
       <output data-testid="time-scale-value">1.00×</output>
     </label>
+    <div class="tuning-panel__sky" aria-label="Sky mode">
+      <div class="tuning-panel__sky-label">
+        <span>SKY MODE</span>
+        <output data-testid="sky-state-value">AUTO</output>
+      </div>
+      <div class="tuning-panel__sky-buttons">
+        <button type="button" data-sky-mode="auto" data-testid="sky-auto">AUTO</button>
+        <button type="button" data-sky-mode="day" data-testid="sky-day">DAY</button>
+        <button type="button" data-sky-mode="sunset" data-testid="sky-sunset">SUNSET</button>
+        <button type="button" data-sky-mode="night" data-testid="sky-night">NIGHT</button>
+      </div>
+    </div>
     <div class="tuning-panel__progress">
       <div class="tuning-panel__progress-label">
         <span>masterTimeline</span>
@@ -60,6 +79,7 @@ export function createTuningPanel(
   const speedInput = panel.querySelector<HTMLInputElement>('[data-testid="time-scale"]');
   const speedOutput = getOutput(panel, 'time-scale-value');
   const progressBar = panel.querySelector<HTMLProgressElement>('[data-testid="timeline-progress-bar"]');
+  const skyButtons = getSkyButtons(panel);
 
   if (!speedInput || !progressBar) {
     throw new Error('Missing timeScale or timeline progress control.');
@@ -72,12 +92,22 @@ export function createTuningPanel(
     void controller.restart().catch(() => undefined);
   };
   const onSpeed = (): void => controller.setSpeed(Number(speedInput.value));
+  const onSkyMode = (event: Event): void => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const mode = button.dataset.skyMode as CitySkyMode | undefined;
+    if (!mode) return;
+
+    skyTuning.setMode(mode);
+    updateSkyModeButtons(panel, skyButtons, skyTuning.getMode());
+  };
 
   playButton.addEventListener('click', onPlay);
   pauseButton.addEventListener('click', onPause);
   resumeButton.addEventListener('click', onResume);
   restartButton.addEventListener('click', onRestart);
   speedInput.addEventListener('input', onSpeed);
+  skyButtons.forEach((button) => button.addEventListener('click', onSkyMode));
+  updateSkyModeButtons(panel, skyButtons, skyTuning.getMode());
 
   const unsubscribe = controller.subscribe((snapshot) => {
     updatePanel(
@@ -92,6 +122,7 @@ export function createTuningPanel(
       progressBar,
     );
     updateResetChecks(panel, getResetChecks());
+    updateSkyModeButtons(panel, skyButtons, skyTuning.getMode());
   });
 
   return {
@@ -102,6 +133,7 @@ export function createTuningPanel(
       resumeButton.removeEventListener('click', onResume);
       restartButton.removeEventListener('click', onRestart);
       speedInput.removeEventListener('input', onSpeed);
+      skyButtons.forEach((button) => button.removeEventListener('click', onSkyMode));
       panel.remove();
     },
   };
@@ -138,6 +170,23 @@ function updateResetChecks(panel: HTMLElement, checks: RuntimeResetChecks): void
   const allPassed = checks.panRoot && checks.shakeRoot && checks.teacher && checks.sceneRoots;
   value.value = allPassed ? 'PASS · scene roots · panRoot · shakeRoot · Teacher' : 'pending';
   value.className = allPassed ? 'is-passed' : '';
+}
+
+function updateSkyModeButtons(
+  panel: HTMLElement,
+  buttons: readonly HTMLButtonElement[],
+  mode: CitySkyMode,
+): void {
+  getOutput(panel, 'sky-state-value').value = mode.toUpperCase();
+  buttons.forEach((button) => {
+    const isActive = button.dataset.skyMode === mode;
+    button.dataset.active = String(isActive);
+    button.setAttribute('aria-pressed', String(isActive));
+  });
+}
+
+function getSkyButtons(panel: HTMLElement): HTMLButtonElement[] {
+  return Array.from(panel.querySelectorAll<HTMLButtonElement>('[data-sky-mode]'));
 }
 
 function getButton(panel: HTMLElement, action: string): HTMLButtonElement {

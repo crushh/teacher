@@ -4,7 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "assets:clean": "node scripts/cleanup-assets.mjs",
+    "assets:clean:city": "node scripts/cleanup-assets.mjs --mode scenery",
+    "assets:clean:teacher": "node scripts/cleanup-assets.mjs --mode character",
+    "predev": "npm run assets:clean",
     "dev": "vite",
+    "prebuild": "npm run assets:clean",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },

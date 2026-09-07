@@ -11,6 +11,7 @@ export type PlaybackState =
 
 export interface PlaybackSnapshot {
   state: PlaybackState;
+  time: number;
   progress: number;
   duration: number;
   speed: number;
@@ -139,6 +140,7 @@ export class PlaybackController {
   getSnapshot(): PlaybackSnapshot {
     return {
       state: this.state,
+      time: this.masterTimeline?.time() ?? 0,
       progress: this.masterTimeline?.progress() ?? 0,
       duration: this.masterTimeline?.duration() ?? 0,
       speed: this.speed,

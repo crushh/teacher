@@ -28,7 +28,7 @@ export function parallax(
     ease: 'none',
     onUpdate: () => {
       layers.forEach((layer) => {
-        const offset = -positiveModulo(clock.elapsed * layer.speed, layer.width);
+        const offset = -Math.round(positiveModulo(clock.elapsed * layer.speed, layer.width));
 
         // Once a segment has moved completely offscreen, it wraps to the
         // other side of the pair. Since both segments are identical, the

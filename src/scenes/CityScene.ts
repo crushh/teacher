@@ -1,32 +1,22 @@
 import { gsap } from 'gsap';
-import { Container, Graphics, Text } from 'pixi.js';
+import { ColorMatrixFilter, Container, Graphics, Sprite, Text } from 'pixi.js';
 
 import { cameraShake } from '../animations/cameraShake';
 import { jumpTo } from '../animations/jump';
 import { parallax } from '../animations/parallax';
 import { squash } from '../animations/squash';
-import { GAME_HEIGHT, GAME_WIDTH, MOVIE_CONFIG } from '../game/config';
+import type { CityAssets } from '../assets/cityAssets';
+import {
+  GAME_HEIGHT,
+  GAME_WIDTH,
+  MOVIE_CONFIG,
+  type CitySkyMode,
+  type CitySkyState,
+} from '../game/config';
 import { Teacher } from '../entities/Teacher';
 import type { Scene, GsapTimeline } from './Scene';
 
-const BACKGROUND_LAYERS = {
-  far: { count: 13, baseY: 230, height: 44, width: 52 },
-  mid: { count: 11, baseY: 270, height: 66, width: 64 },
-  front: { count: 9, baseY: 320, height: 94, width: 78 },
-} as const;
-
-const BUILDING_GAP = 8;
-
-function getSegmentWidth(options: { readonly count: number; readonly width: number }): number {
-  return options.count * (options.width + BUILDING_GAP);
-}
-
 const COLORS = {
-  sky: 0x182a52,
-  horizon: 0x305074,
-  far: 0x263955,
-  mid: 0x1b2c46,
-  front: 0x132136,
   roof: 0x394f6d,
   roofTop: 0x6885a1,
   window: 0xffc857,
@@ -44,42 +34,86 @@ type ResolvedRooftop = CityRooftopConfig & {
   takeoffX: number;
 };
 
+type SkyVisualState = {
+  topColor: number;
+  middleColor: number;
+  horizonColor: number;
+  brightness: number;
+  cloudColor: number;
+  cloudAlpha: number;
+  starAlpha: number;
+  moonAlpha: number;
+  windowLightAlpha: number;
+  cityBrightness: number;
+  citySaturation: number;
+  cityTint: number;
+  cityTintStrength: number;
+};
+
+const SKY_BAND_COUNT = 60;
+
 export class CityScene implements Scene {
   readonly id = 'city';
   readonly root = new Container({ label: 'CityScene.root' });
 
   private readonly teacher: Teacher;
+  private readonly cityAssets: CityAssets;
   private readonly panRoot: Container;
   private readonly shakeRoot: Container;
-  private readonly farLayer = new Container({ label: 'buildingsFar' });
-  private readonly midLayer = new Container({ label: 'buildingsMid' });
-  private readonly frontLayer = new Container({ label: 'buildingsFront' });
+  private readonly skyContainer = new Container({ label: 'skyContainer' });
+  private readonly proceduralSky = new Container({ label: 'proceduralSky' });
+  private readonly starLayer = new Container({ label: 'stars' });
+  private readonly cloudContainer = new Container({ label: 'cloudContainer' });
+  private readonly skyGradientBands: Graphics[] = [];
+  private readonly cloudMotion = { x: 0 };
+  private readonly farCityFilter = new ColorMatrixFilter();
+  private readonly midCityFilter = new ColorMatrixFilter();
+  private readonly frontCityFilter = new ColorMatrixFilter();
+  private readonly farLayer = new Container({ label: 'farLayer' });
+  private readonly midLayer = new Container({ label: 'midLayer' });
+  private readonly frontLayer = new Container({ label: 'frontLayer' });
   private readonly farSegments: [Container, Container] = [
-    new Container({ label: 'buildingsFar.segmentA' }),
-    new Container({ label: 'buildingsFar.segmentB' }),
+    new Container({ label: 'farLayer.segmentA' }),
+    new Container({ label: 'farLayer.segmentB' }),
   ];
   private readonly midSegments: [Container, Container] = [
-    new Container({ label: 'buildingsMid.segmentA' }),
-    new Container({ label: 'buildingsMid.segmentB' }),
+    new Container({ label: 'midLayer.segmentA' }),
+    new Container({ label: 'midLayer.segmentB' }),
   ];
   private readonly frontSegments: [Container, Container] = [
-    new Container({ label: 'buildingsFront.segmentA' }),
-    new Container({ label: 'buildingsFront.segmentB' }),
+    new Container({ label: 'frontLayer.segmentA' }),
+    new Container({ label: 'frontLayer.segmentB' }),
   ];
   private readonly platforms = new Container({ label: 'platforms' });
   private readonly effects = new Container({ label: 'cityEffects' });
   private readonly speedLines = new Graphics({ label: 'citySpeedLines' });
   private readonly dustBursts: Container[] = [];
+  private readonly windowLights: Graphics[] = [];
   private activeTimeline: GsapTimeline | undefined;
+  private moonSprite: Sprite | undefined;
   private context: gsap.Context | undefined;
   private built = false;
+  private skyBuilt = false;
+  private skyMode: CitySkyMode = 'auto';
+  private skyState: CitySkyState = 'day';
+  private skyTimelineProgress = 0;
+  private readonly skyVisual: SkyVisualState = {
+    ...MOVIE_CONFIG.city.sky.states.day,
+  };
 
-  private readonly farSegmentWidth = getSegmentWidth(BACKGROUND_LAYERS.far);
-  private readonly midSegmentWidth = getSegmentWidth(BACKGROUND_LAYERS.mid);
-  private readonly frontSegmentWidth = getSegmentWidth(BACKGROUND_LAYERS.front);
+  private farSegmentWidth = 0;
+  private midSegmentWidth = 0;
+  private frontSegmentWidth = 0;
 
-  constructor(teacher: Teacher, panRoot: Container, shakeRoot: Container, sceneHost: Container) {
+  constructor(
+    teacher: Teacher,
+    panRoot: Container,
+    shakeRoot: Container,
+    sceneHost: Container,
+    cityAssets: CityAssets,
+  ) {
     this.teacher = teacher;
+    this.cityAssets = cityAssets;
     this.panRoot = panRoot;
     this.shakeRoot = shakeRoot;
     sceneHost.addChild(this.root);
@@ -89,12 +123,34 @@ export class CityScene implements Scene {
     if (this.built) return;
 
     this.root.addChild(this.createSky());
-    this.createBuildingSegments(this.farLayer, this.farSegments, COLORS.far, BACKGROUND_LAYERS.far);
-    this.createBuildingSegments(this.midLayer, this.midSegments, COLORS.mid, BACKGROUND_LAYERS.mid);
-    this.createBuildingSegments(this.frontLayer, this.frontSegments, COLORS.front, BACKGROUND_LAYERS.front);
+    this.farSegmentWidth = this.createImageSegments(
+      this.farLayer,
+      this.farSegments,
+      this.cityAssets.far,
+      'far',
+      MOVIE_CONFIG.city.parallax.far,
+    );
+    this.midSegmentWidth = this.createImageSegments(
+      this.midLayer,
+      this.midSegments,
+      this.cityAssets.mid,
+      'mid',
+      MOVIE_CONFIG.city.parallax.mid,
+    );
+    this.frontSegmentWidth = this.createImageSegments(
+      this.frontLayer,
+      this.frontSegments,
+      this.cityAssets.near,
+      'front',
+      MOVIE_CONFIG.city.parallax.front,
+    );
+    this.layoutParallaxLayers();
+    this.attachCityAtmosphereFilters();
+    this.applySkyVisuals();
     this.root.addChild(this.farLayer, this.midLayer, this.frontLayer);
     this.root.addChild(this.platforms);
     this.createPlatforms();
+    this.applySkyVisuals();
     this.createEffects();
     this.root.addChild(this.effects);
     this.root.addChild(this.createLabel());
@@ -130,6 +186,10 @@ export class CityScene implements Scene {
         y: firstRoof.roofY - 36,
         visible: true,
         alpha: 1,
+      }, 0);
+      sceneTimeline.set(this.teacher.visual.scale, {
+        x: MOVIE_CONFIG.city.teacherScale,
+        y: MOVIE_CONFIG.city.teacherScale,
       }, 0);
       sceneTimeline.call(() => this.teacher.setPose('fall'), [], 0);
       sceneTimeline.to(this.teacher.root, { y: firstRoof.roofY, duration: MOVIE_CONFIG.city.initialLandingAt, ease: 'bounce.out' }, 0);
@@ -191,21 +251,27 @@ export class CityScene implements Scene {
       });
 
       const cityDuration = this.getCityDuration(rooftops);
+      sceneTimeline.to(this.cloudMotion, {
+        x: -MOVIE_CONFIG.city.sky.cloudSpeed * cityDuration,
+        duration: cityDuration,
+        ease: 'none',
+        onUpdate: () => this.updateCloudPosition(),
+      }, 0);
       sceneTimeline.add(parallax([
         {
           segments: this.farSegments,
           width: this.farSegmentWidth,
-          speed: MOVIE_CONFIG.city.farSpeed,
+          speed: MOVIE_CONFIG.city.parallax.far.speed,
         },
         {
           segments: this.midSegments,
           width: this.midSegmentWidth,
-          speed: MOVIE_CONFIG.city.midSpeed,
+          speed: MOVIE_CONFIG.city.parallax.mid.speed,
         },
         {
           segments: this.frontSegments,
           width: this.frontSegmentWidth,
-          speed: MOVIE_CONFIG.city.frontSpeed,
+          speed: MOVIE_CONFIG.city.parallax.front.speed,
         },
       ], cityDuration), 0);
       const finalJumpStart = cityDuration - MOVIE_CONFIG.city.finalJump.duration;
@@ -230,10 +296,12 @@ export class CityScene implements Scene {
 
   reset(): void {
     this.resetContainer(this.root, false);
+    this.resetContainer(this.skyContainer, true);
+    this.resetSky();
     this.resetContainer(this.speedLines, false);
-    this.resetBuildingSegments(this.farLayer, this.farSegments, this.farSegmentWidth);
-    this.resetBuildingSegments(this.midLayer, this.midSegments, this.midSegmentWidth);
-    this.resetBuildingSegments(this.frontLayer, this.frontSegments, this.frontSegmentWidth);
+    this.resetImageSegments(this.farLayer, this.farSegments, this.farSegmentWidth);
+    this.resetImageSegments(this.midLayer, this.midSegments, this.midSegmentWidth);
+    this.resetImageSegments(this.frontLayer, this.frontSegments, this.frontSegmentWidth);
     this.resetContainer(this.platforms, true);
     this.dustBursts.forEach((dust) => this.resetContainer(dust, false));
   }
@@ -244,11 +312,48 @@ export class CityScene implements Scene {
     this.activeTimeline = undefined;
     this.context = undefined;
     this.root.removeChildren();
-    this.clearBuildingSegments(this.farLayer, this.farSegments);
-    this.clearBuildingSegments(this.midLayer, this.midSegments);
-    this.clearBuildingSegments(this.frontLayer, this.frontSegments);
+    this.clearImageSegments(this.farLayer, this.farSegments);
+    this.clearImageSegments(this.midLayer, this.midSegments);
+    this.clearImageSegments(this.frontLayer, this.frontSegments);
     this.dustBursts.length = 0;
+    this.windowLights.length = 0;
     this.built = false;
+  }
+
+  getSkyMode(): CitySkyMode {
+    return this.skyMode;
+  }
+
+  getSkyState(): CitySkyState {
+    return this.skyState;
+  }
+
+  updateSkyFromTimeline(progress: number): void {
+    this.skyTimelineProgress = clamp01(progress);
+    if (this.skyMode !== 'auto') return;
+
+    const visual = this.getSkyVisualAtProgress(this.skyTimelineProgress);
+    Object.assign(this.skyVisual, visual.visual);
+    this.skyState = visual.state;
+    this.applySkyVisuals();
+  }
+
+  setSkyMode(mode: CitySkyMode): void {
+    this.skyMode = mode;
+
+    if (mode === 'auto') {
+      this.updateSkyFromTimeline(this.skyTimelineProgress);
+      return;
+    }
+
+    this.setSkyState(mode);
+  }
+
+  setSkyState(state: CitySkyState): void {
+    this.skyMode = state;
+    Object.assign(this.skyVisual, MOVIE_CONFIG.city.sky.states[state]);
+    this.skyState = state;
+    this.applySkyVisuals();
   }
 
   private addLandingFeedback(timeline: GsapTimeline, at: number, x: number, y: number, dustIndex: number): void {
@@ -256,7 +361,12 @@ export class CityScene implements Scene {
     if (!dust) return;
 
     timeline.set(dust, { x, y, visible: true, alpha: 1 }, at);
-    timeline.add(squash(this.teacher.visual, MOVIE_CONFIG.city.landingSquash, 0.18), at);
+    timeline.add(squash(
+      this.teacher.visual,
+      MOVIE_CONFIG.city.landingSquash,
+      0.18,
+      MOVIE_CONFIG.city.teacherScale,
+    ), at);
     timeline.add(cameraShake(this.shakeRoot, { strength: 4, duration: 0.15 }), at);
     timeline.to(dust, {
       y: y - 12,
@@ -316,7 +426,7 @@ export class CityScene implements Scene {
       x: options.fromX,
       y: options.y,
     }, 0);
-    timeline.call(() => this.teacher.setPose('run'), [], 0);
+    this.addRunPoseSwitches(timeline, 0, options.duration);
     timeline.to(this.teacher.root, {
       x: options.toX,
       duration: options.duration,
@@ -334,66 +444,231 @@ export class CityScene implements Scene {
     return timeline;
   }
 
-  private createSky(): Graphics {
-    const sky = new Graphics()
-      .rect(0, 0, GAME_WIDTH, GAME_HEIGHT)
-      .fill(COLORS.sky)
-      .rect(0, 190, GAME_WIDTH, 170)
-      .fill(COLORS.horizon)
-      .circle(535, 64, 27)
-      .fill({ color: COLORS.window, alpha: 0.85 });
-    for (let i = 0; i < 14; i += 1) {
-      sky.rect(22 + i * 47, 38 + (i % 3) * 18, 2, 2).fill({ color: COLORS.text, alpha: 0.7 });
+  private addRunPoseSwitches(timeline: GsapTimeline, startAt: number, endAt: number): void {
+    timeline.call(() => this.teacher.setPose('run1'), [], startAt);
+    let frame = 1;
+    const frameDuration = MOVIE_CONFIG.city.runFrameDuration;
+
+    for (let at = startAt + frameDuration; at < endAt; at += frameDuration) {
+      const pose = frame % 2 === 1 ? 'run2' : 'run1';
+      timeline.call(() => this.teacher.setPose(pose), [], at);
+      frame += 1;
     }
-    return sky;
   }
 
-  private createBuildingSegments(
-    layer: Container,
-    segments: readonly [Container, Container],
-    color: number,
-    options: {
-      readonly count: number;
-      readonly baseY: number;
-      readonly height: number;
-      readonly width: number;
-    },
-  ): void {
-    const segmentWidth = getSegmentWidth(options);
+  private createSky(): Container {
+    if (!this.skyBuilt) {
+      const bandHeight = GAME_HEIGHT / SKY_BAND_COUNT;
+      for (let index = 0; index < SKY_BAND_COUNT; index += 1) {
+        const band = new Graphics({ label: `skyBand${index}` })
+          .rect(0, index * bandHeight, GAME_WIDTH, bandHeight + 1)
+          .fill(0xffffff);
+        this.skyGradientBands.push(band);
+        this.proceduralSky.addChild(band);
+      }
 
-    segments.forEach((segment, segmentIndex) => {
-      this.createBuildings(segment, color, options);
-      segment.x = segmentIndex * segmentWidth;
-      layer.addChild(segment);
+      this.createStars();
+      this.moonSprite = new Sprite(this.cityAssets.moon);
+      this.moonSprite.label = 'moon';
+      this.moonSprite.anchor.set(0.5);
+      this.moonSprite.position.set(535, 58);
+      this.moonSprite.scale.set(0.1);
+
+      this.cloudContainer.addChild(
+        this.createCloud(34, 48, 1),
+        this.createCloud(278, 88, 0.78),
+        this.createCloud(488, 40, 0.66),
+      );
+
+      this.skyContainer.addChild(
+        this.proceduralSky,
+        this.starLayer,
+        this.moonSprite,
+        this.cloudContainer,
+      );
+      this.skyBuilt = true;
+    }
+
+    return this.skyContainer;
+  }
+
+  private createStars(): void {
+    const stars = [
+      [34, 28, 1, 0.56], [78, 76, 1, 0.72], [121, 42, 2, 0.42], [165, 25, 1, 0.64],
+      [214, 68, 1, 0.5], [252, 34, 1, 0.78], [304, 18, 2, 0.48], [344, 63, 1, 0.6],
+      [386, 31, 1, 0.74], [425, 83, 1, 0.46], [468, 22, 1, 0.68], [512, 95, 2, 0.4],
+      [558, 30, 1, 0.7], [606, 74, 1, 0.5], [38, 132, 1, 0.42], [104, 116, 1, 0.62],
+      [186, 148, 1, 0.48], [274, 126, 1, 0.68], [362, 104, 1, 0.54], [448, 142, 1, 0.44],
+      [536, 124, 1, 0.64], [620, 150, 1, 0.46],
+    ] as const;
+
+    stars.forEach(([x, y, size, alpha], index) => {
+      const star = new Graphics({ label: `star${index}` })
+        .rect(x, y, size, size)
+        .fill(0xffffff);
+      star.alpha = alpha;
+      this.starLayer.addChild(star);
     });
   }
 
-  private createBuildings(
-    layer: Container,
-    color: number,
-    options: {
-      readonly count: number;
-      readonly baseY: number;
-      readonly height: number;
-      readonly width: number;
-    },
-  ): void {
-    for (let i = 0; i < options.count; i += 1) {
-      const buildingHeight = options.height + (i % 4) * 18;
-      const building = new Graphics()
-        .rect(i * (options.width + BUILDING_GAP), options.baseY - buildingHeight, options.width, buildingHeight)
-        .fill(color);
-      for (let row = 0; row < Math.floor(buildingHeight / 22); row += 1) {
-        for (let column = 0; column < 3; column += 1) {
-          building.rect(i * (options.width + BUILDING_GAP) + 10 + column * 16, options.baseY - buildingHeight + 12 + row * 22, 5, 7)
-            .fill({ color: row % 2 === 0 ? COLORS.windowCool : COLORS.window, alpha: 0.48 });
-        }
-      }
-      layer.addChild(building);
-    }
+  private createCloud(x: number, y: number, scale: number): Graphics {
+    const cloud = new Graphics({ label: 'pixelCloud' });
+    cloud
+      .rect(0, 10, 46, 8)
+      .rect(8, 5, 23, 10)
+      .rect(18, 1, 16, 12)
+      .rect(29, 7, 26, 11)
+      .fill(0xffffff);
+    cloud.position.set(x, y);
+    cloud.scale.set(scale);
+    return cloud;
   }
 
-  private resetBuildingSegments(
+  private attachCityAtmosphereFilters(): void {
+    this.farLayer.filters = [this.farCityFilter];
+    this.midLayer.filters = [this.midCityFilter];
+    this.frontLayer.filters = [this.frontCityFilter];
+  }
+
+  private applySkyVisuals(): void {
+    const { topColor, middleColor, horizonColor, brightness } = this.skyVisual;
+    this.skyGradientBands.forEach((band, index) => {
+      const position = index / Math.max(this.skyGradientBands.length - 1, 1);
+      const color = position < 0.5
+        ? interpolateColor(topColor, middleColor, position * 2)
+        : interpolateColor(middleColor, horizonColor, (position - 0.5) * 2);
+      band.tint = multiplyColor(color, brightness);
+    });
+
+    this.starLayer.alpha = this.skyVisual.starAlpha;
+    this.cloudContainer.tint = this.skyVisual.cloudColor;
+    this.cloudContainer.alpha = this.skyVisual.cloudAlpha;
+    if (this.moonSprite) this.moonSprite.alpha = this.skyVisual.moonAlpha;
+    this.windowLights.forEach((windowLight) => {
+      windowLight.alpha = this.skyVisual.windowLightAlpha;
+    });
+
+    const cityTint = interpolateColor(0xffffff, this.skyVisual.cityTint, this.skyVisual.cityTintStrength);
+    [this.farCityFilter, this.midCityFilter, this.frontCityFilter].forEach((filter) => {
+      filter.reset();
+      filter.tint(cityTint, false);
+      filter.saturate(this.skyVisual.citySaturation, true);
+      filter.brightness(this.skyVisual.cityBrightness, true);
+    });
+  }
+
+  private updateCloudPosition(): void {
+    this.cloudContainer.x = Math.round(this.cloudMotion.x);
+  }
+
+  private resetSky(): void {
+    this.skyMode = 'auto';
+    this.skyTimelineProgress = 0;
+    Object.assign(this.skyVisual, MOVIE_CONFIG.city.sky.states.day);
+    this.skyState = 'day';
+    this.cloudMotion.x = 0;
+    this.updateCloudPosition();
+    this.applySkyVisuals();
+  }
+
+  private getSkyVisualAtProgress(progress: number): {
+    state: CitySkyState;
+    visual: SkyVisualState;
+  } {
+    const { timeline, states } = MOVIE_CONFIG.city.sky;
+
+    if (progress < timeline.dayStableEnd) {
+      return { state: 'day', visual: { ...states.day } };
+    }
+
+    if (progress < timeline.dayToSunsetEnd) {
+      return {
+        state: 'sunset',
+        visual: interpolateSkyVisual(
+          states.day,
+          states.sunset,
+          normalizeRange(progress, timeline.dayStableEnd, timeline.dayToSunsetEnd),
+        ),
+      };
+    }
+
+    if (progress < timeline.sunsetStableEnd) {
+      return { state: 'sunset', visual: { ...states.sunset } };
+    }
+
+    if (progress < timeline.sunsetToNightEnd) {
+      return {
+        state: 'night',
+        visual: interpolateSkyVisual(
+          states.sunset,
+          states.night,
+          normalizeRange(progress, timeline.sunsetStableEnd, timeline.sunsetToNightEnd),
+        ),
+      };
+    }
+
+    return { state: 'night', visual: { ...states.night } };
+  }
+
+  private createImageSegments(
+    layer: Container,
+    segments: readonly [Container, Container],
+    texture: CityAssets['far'],
+    layerName: string,
+    options: {
+      readonly scale: number;
+    },
+  ): number {
+    const sprites = segments.map((segment, segmentIndex) => {
+      const sprite = new Sprite(texture);
+      sprite.label = `${layerName}Sprite${segmentIndex === 0 ? 'A' : 'B'}`;
+      sprite.position.set(0, 0);
+      sprite.scale.set(options.scale);
+      segment.addChild(sprite);
+      layer.addChild(segment);
+      return sprite;
+    });
+    const segmentWidth = Math.round(sprites[0].width);
+
+    if (!Number.isInteger(sprites[0].width) || sprites[1].width !== sprites[0].width) {
+      throw new Error(`${layerName} city texture must have an integer repeated width.`);
+    }
+
+    segments.forEach((segment, segmentIndex) => {
+      segment.x = segmentIndex * segmentWidth;
+    });
+    return segmentWidth;
+  }
+
+  private layoutParallaxLayers(): void {
+    const viewportHeight = GAME_HEIGHT;
+
+    this.setSegmentY(
+      this.farSegments,
+      viewportHeight * MOVIE_CONFIG.city.layout.far.yRatio,
+    );
+    this.setSegmentY(
+      this.midSegments,
+      viewportHeight * MOVIE_CONFIG.city.layout.mid.yRatio,
+    );
+    this.setSegmentY(
+      this.frontSegments,
+      viewportHeight * MOVIE_CONFIG.city.layout.front.yRatio,
+    );
+  }
+
+  private setSegmentY(segments: readonly [Container, Container], y: number): void {
+    segments.forEach((segment) => {
+      const sprite = segment.children[0];
+      if (!(sprite instanceof Sprite)) {
+        throw new Error('City parallax segment is missing its image sprite.');
+      }
+
+      sprite.y = Math.round(y);
+    });
+  }
+
+  private resetImageSegments(
     layer: Container,
     segments: readonly [Container, Container],
     segmentWidth: number,
@@ -405,7 +680,7 @@ export class CityScene implements Scene {
     });
   }
 
-  private clearBuildingSegments(
+  private clearImageSegments(
     layer: Container,
     segments: readonly [Container, Container],
   ): void {
@@ -422,11 +697,13 @@ export class CityScene implements Scene {
         .rect(x - 5, top - 7, width + 10, 7)
         .fill(COLORS.roofTop));
       for (let row = 0; row < Math.floor(height / 30); row += 1) {
-        building.addChild(new Graphics()
+        const windowLight = new Graphics()
           .rect(x + 12, top + 16 + row * 30, 8, 10)
           .fill({ color: COLORS.windowCool, alpha: 0.45 })
           .rect(x + width - 22, top + 16 + row * 30, 8, 10)
-          .fill({ color: COLORS.window, alpha: 0.45 }));
+          .fill({ color: COLORS.window, alpha: 0.45 });
+        this.windowLights.push(windowLight);
+        building.addChild(windowLight);
       }
       const labelText = new Text({
         text: `ROOF ${id}`,
@@ -489,4 +766,65 @@ export class CityScene implements Scene {
     container.visible = visible;
     container.tint = 0xffffff;
   }
+}
+
+function interpolateColor(from: number, to: number, amount: number): number {
+  const mix = Math.max(0, Math.min(1, amount));
+  const fromRed = (from >> 16) & 0xff;
+  const fromGreen = (from >> 8) & 0xff;
+  const fromBlue = from & 0xff;
+  const toRed = (to >> 16) & 0xff;
+  const toGreen = (to >> 8) & 0xff;
+  const toBlue = to & 0xff;
+
+  return (
+    (Math.round(fromRed + (toRed - fromRed) * mix) << 16)
+    | (Math.round(fromGreen + (toGreen - fromGreen) * mix) << 8)
+    | Math.round(fromBlue + (toBlue - fromBlue) * mix)
+  );
+}
+
+function interpolateSkyVisual(
+  from: SkyVisualState,
+  to: SkyVisualState,
+  amount: number,
+): SkyVisualState {
+  const mix = clamp01(amount);
+
+  return {
+    topColor: interpolateColor(from.topColor, to.topColor, mix),
+    middleColor: interpolateColor(from.middleColor, to.middleColor, mix),
+    horizonColor: interpolateColor(from.horizonColor, to.horizonColor, mix),
+    brightness: interpolateNumber(from.brightness, to.brightness, mix),
+    cloudColor: interpolateColor(from.cloudColor, to.cloudColor, mix),
+    cloudAlpha: interpolateNumber(from.cloudAlpha, to.cloudAlpha, mix),
+    starAlpha: interpolateNumber(from.starAlpha, to.starAlpha, mix),
+    moonAlpha: interpolateNumber(from.moonAlpha, to.moonAlpha, mix),
+    windowLightAlpha: interpolateNumber(from.windowLightAlpha, to.windowLightAlpha, mix),
+    cityBrightness: interpolateNumber(from.cityBrightness, to.cityBrightness, mix),
+    citySaturation: interpolateNumber(from.citySaturation, to.citySaturation, mix),
+    cityTint: interpolateColor(from.cityTint, to.cityTint, mix),
+    cityTintStrength: interpolateNumber(from.cityTintStrength, to.cityTintStrength, mix),
+  };
+}
+
+function interpolateNumber(from: number, to: number, amount: number): number {
+  return from + (to - from) * clamp01(amount);
+}
+
+function normalizeRange(value: number, start: number, end: number): number {
+  if (end <= start) return value >= end ? 1 : 0;
+  return clamp01((value - start) / (end - start));
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function multiplyColor(color: number, amount: number): number {
+  const red = Math.round(((color >> 16) & 0xff) * amount);
+  const green = Math.round(((color >> 8) & 0xff) * amount);
+  const blue = Math.round((color & 0xff) * amount);
+
+  return (Math.min(255, red) << 16) | (Math.min(255, green) << 8) | Math.min(255, blue);
 }

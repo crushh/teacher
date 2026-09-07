@@ -38,6 +38,9 @@ export const RUNTIME_CONFIG = {
   },
 } as const;
 
+export type CitySkyState = 'day' | 'sunset' | 'night';
+export type CitySkyMode = 'auto' | CitySkyState;
+
 export const MOVIE_CONFIG = {
   teacher: {
     startX: 390,
@@ -75,10 +78,75 @@ export const MOVIE_CONFIG = {
   city: {
     initialLandingAt: 0.4,
     runSpeed: 60,
+    runFrameDuration: 0.12,
     roofPadding: 24,
-    farSpeed: 60,
-    midSpeed: 140,
-    frontSpeed:200,
+    teacherScale: 0.5,
+    parallax: {
+      far: { speed: 60, scale: 0.5 },
+      mid: { speed: 140, scale: 0.5 },
+      front: { speed: 200, scale: 0.5 },
+    },
+    layout: {
+      far: { yRatio: -0.18 },
+      mid: { yRatio: 0.00 },
+      front: { yRatio: 0.22 },
+    },
+    sky: {
+      cloudSpeed: 8,
+      timeline: {
+        dayStableEnd: 0.35,
+        dayToSunsetEnd: 0.55,
+        sunsetStableEnd: 0.65,
+        sunsetToNightEnd: 0.85,
+      },
+      states: {
+        day: {
+          topColor: 0x4b93d1,
+          middleColor: 0x78b8e2,
+          horizonColor: 0xb8def0,
+          brightness: 1,
+          cloudColor: 0xeaf5ff,
+          cloudAlpha: 0.42,
+          starAlpha: 0,
+          moonAlpha: 0,
+          windowLightAlpha: 0.1,
+          cityBrightness: 1,
+          citySaturation: 0,
+          cityTint: 0xffffff,
+          cityTintStrength: 0,
+        },
+        sunset: {
+          topColor: 0x57468e,
+          middleColor: 0x9a5aa4,
+          horizonColor: 0xf3a16d,
+          brightness: 0.98,
+          cloudColor: 0xf0a0ba,
+          cloudAlpha: 0.46,
+          starAlpha: 0.05,
+          moonAlpha: 0,
+          windowLightAlpha: 0.45,
+          cityBrightness: 0.88,
+          citySaturation: 0.05,
+          cityTint: 0xffb5a6,
+          cityTintStrength: 0.2,
+        },
+        night: {
+          topColor: 0x071637,
+          middleColor: 0x142b5d,
+          horizonColor: 0x38527a,
+          brightness: 0.94,
+          cloudColor: 0x3f427d,
+          cloudAlpha: 0.5,
+          starAlpha: 0.88,
+          moonAlpha: 0.96,
+          windowLightAlpha: 1,
+          cityBrightness: 0.7,
+          citySaturation: -0.12,
+          cityTint: 0x8aaee9,
+          cityTintStrength: 0.24,
+        },
+      },
+    },
     landingSquash: 0.2,
     rooftops: [
       {

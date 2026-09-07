@@ -2,6 +2,7 @@ import { Application, Container } from 'pixi.js';
 import { gsap } from 'gsap';
 
 import { loadClassroomAssets, type ClassroomAssets } from '../assets/classroomAssets';
+import { loadCityAssets, type CityAssets } from '../assets/cityAssets';
 import { createTuningPanel, type RuntimeResetChecks, type TuningPanel } from '../dev/createTuningPanel';
 import { Teacher } from '../entities/Teacher';
 import { ClassroomScene } from '../scenes/ClassroomScene';
@@ -28,6 +29,8 @@ export class Game {
   private transitionContext: gsap.Context | undefined;
   private playbackController: PlaybackController | undefined;
   private tuningPanel: TuningPanel | undefined;
+  private unsubscribeSkyTimeline: (() => void) | undefined;
+  private cityTimelineRange = { start: 0, end: 1 };
 
   constructor(mount: HTMLElement) {
     this.mount = mount;
@@ -49,14 +52,19 @@ export class Game {
 
     window.addEventListener('resize', this.handleResize, { passive: true });
     window.visualViewport?.addEventListener('resize', this.handleResize, { passive: true });
-    const classroomAssets = await loadClassroomAssets();
-    this.createMovieRuntime(classroomAssets);
+    const [classroomAssets, cityAssets] = await Promise.all([
+      loadClassroomAssets(),
+      loadCityAssets(),
+    ]);
+    this.createMovieRuntime(classroomAssets, cityAssets);
     this.resize();
   }
 
   destroy(): void {
     this.tuningPanel?.destroy();
     this.tuningPanel = undefined;
+    this.unsubscribeSkyTimeline?.();
+    this.unsubscribeSkyTimeline = undefined;
     this.classroomScene?.dispose();
     this.cityScene?.dispose();
     this.hallwayScene?.dispose();
@@ -77,13 +85,13 @@ export class Game {
     }
   }
 
-  private createMovieRuntime(classroomAssets: ClassroomAssets): void {
+  private createMovieRuntime(classroomAssets: ClassroomAssets, cityAssets: CityAssets): void {
     const teacher = new Teacher({
       x: MOVIE_CONFIG.teacher.startX,
       y: MOVIE_CONFIG.teacher.startY,
     }, classroomAssets.teacher);
     const classroomScene = new ClassroomScene(teacher, this.sceneHost, classroomAssets.environment, this.mount);
-    const cityScene = new CityScene(teacher, this.panRoot, this.shakeRoot, this.sceneHost);
+    const cityScene = new CityScene(teacher, this.panRoot, this.shakeRoot, this.sceneHost, cityAssets);
     const hallwayScene = new HallwayScene(teacher, this.shakeRoot, this.sceneHost);
     classroomScene.build();
     cityScene.build();
@@ -103,7 +111,20 @@ export class Game {
       maxSpeed: MOVIE_CONFIG.speed.max,
     });
     this.playbackController.initialize();
-    this.tuningPanel = createTuningPanel(this.mount, this.playbackController, () => this.getResetChecks());
+    this.unsubscribeSkyTimeline = this.playbackController.subscribe((snapshot) => {
+      this.cityScene?.updateSkyFromTimeline(
+        normalizeTimelineTime(snapshot.time, this.cityTimelineRange.start, this.cityTimelineRange.end),
+      );
+    });
+    this.tuningPanel = createTuningPanel(
+      this.mount,
+      this.playbackController,
+      () => this.getResetChecks(),
+      {
+        getMode: () => this.cityScene?.getSkyMode() ?? 'auto',
+        setMode: (mode) => this.cityScene?.setSkyMode(mode),
+      },
+    );
   }
 
   private createMovieTimeline() {
@@ -143,7 +164,7 @@ export class Game {
       onSwap: () => this.resetMovieStateForLoopBoundary(),
     }));
 
-    return createMasterTimeline([
+    const masterTimeline = createMasterTimeline([
       classroomTL,
       classroomToCityTL,
       cityTL,
@@ -152,6 +173,12 @@ export class Game {
       hallwayExitTL,
       hallwayToClassroomTransitionTL,
     ]);
+    this.cityTimelineRange = {
+      start: cityTL.startTime(),
+      end: cityTL.startTime() + cityTL.duration(),
+    };
+
+    return masterTimeline;
   }
 
   private resetMovieState(): void {
@@ -266,4 +293,9 @@ export class Game {
 
 function nearlyEqual(left: number, right: number): boolean {
   return Math.abs(left - right) < 0.0001;
+}
+
+function normalizeTimelineTime(time: number, start: number, end: number): number {
+  if (end <= start) return time >= end ? 1 : 0;
+  return Math.max(0, Math.min(1, (time - start) / (end - start)));
 }
