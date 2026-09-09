@@ -1,5 +1,5 @@
 import { gsap } from 'gsap';
-import { ColorMatrixFilter, Container, Graphics, Sprite, Text } from 'pixi.js';
+import { ColorMatrixFilter, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
 
 import { cameraShake } from '../animations/cameraShake';
 import { jumpTo } from '../animations/jump';
@@ -17,8 +17,6 @@ import { Teacher } from '../entities/Teacher';
 import type { Scene, GsapTimeline } from './Scene';
 
 const COLORS = {
-  roof: 0x394f6d,
-  roofTop: 0x6885a1,
   window: 0xffc857,
   windowCool: 0x57c7ff,
   text: 0xf6f0d7,
@@ -27,12 +25,103 @@ const COLORS = {
   dust: 0xd5c1a2,
 } as const;
 
-type CityRooftopConfig = (typeof MOVIE_CONFIG.city.rooftops)[number];
-type ResolvedRooftop = CityRooftopConfig & {
+type ResolvedRooftop = {
+  readonly id: string;
+  readonly height: number;
+  readonly landingX: number;
+  roofY: number;
+  readonly runDuration: number;
+  readonly jumpToNext?: {
+    readonly height: number;
+    readonly duration: number;
+  };
   x: number;
   width: number;
   takeoffX: number;
 };
+
+/*
+ * Rooftop visual decorations are temporarily disabled.
+ * Keep this definition commented so the decoration layout can be restored later.
+ *
+ * type RooftopDecorationAsset = 'rooftopUtilityBox1' | 'rooftopUtilityBox2' | 'waterTank1' | 'waterTank2';
+ *
+ * type RooftopDecorationSpec = {
+ *   asset: RooftopDecorationAsset;
+ *   xRatio: number;
+ *   scale: number;
+ * };
+ */
+
+type RooftopFacadeAsset =
+  | 'roofALeft'
+  | 'roofAMiddle'
+  | 'roofARight'
+  | 'roofBLeft'
+  | 'roofBMiddle'
+  | 'roofBRight'
+  | 'roofCLeft'
+  | 'roofCMiddle'
+  | 'roofCRight';
+
+type FacadeFrame = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+type RooftopFacadePart = {
+  readonly asset: RooftopFacadeAsset;
+  readonly frame: FacadeFrame;
+  /** Source-pixel height of the fixed roof cap before the repeatable wall starts. */
+  readonly bodyStart: number;
+};
+
+type RooftopFacadeSpec = {
+  readonly left: RooftopFacadePart;
+  readonly middle: RooftopFacadePart;
+  readonly right: RooftopFacadePart;
+};
+
+// Visible alpha bounds (alpha >= 16) from the supplied PNGs. The source images
+// stay untouched; these frames remove their transparent export padding at runtime.
+const ROOFTOP_FACADES: Record<string, RooftopFacadeSpec> = {
+  A: {
+    left: { asset: 'roofALeft', frame: { x: 136, y: 272, width: 982, height: 723 }, bodyStart: 118 },
+    middle: { asset: 'roofAMiddle', frame: { x: 47, y: 278, width: 1354, height: 568 }, bodyStart: 104 },
+    right: { asset: 'roofARight', frame: { x: 96, y: 250, width: 1062, height: 775 }, bodyStart: 135 },
+  },
+  B: {
+    left: { asset: 'roofBLeft', frame: { x: 90, y: 320, width: 1074, height: 637 }, bodyStart: 120 },
+    middle: { asset: 'roofBMiddle', frame: { x: 76, y: 272, width: 1296, height: 582 }, bodyStart: 108 },
+    right: { asset: 'roofBRight', frame: { x: 129, y: 236, width: 997, height: 803 }, bodyStart: 144 },
+  },
+  C: {
+    left: { asset: 'roofCLeft', frame: { x: 72, y: 225, width: 1305, height: 677 }, bodyStart: 115 },
+    middle: { asset: 'roofCMiddle', frame: { x: 32, y: 252, width: 1385, height: 579 }, bodyStart: 115 },
+    right: { asset: 'roofCRight', frame: { x: 58, y: 232, width: 1138, height: 818 }, bodyStart: 132 },
+  },
+};
+
+/*
+ * Rooftop visual decorations are disabled for the current city composition.
+ *
+ * const ROOFTOP_DECORATIONS: Record<string, readonly RooftopDecorationSpec[]> = {
+ *   A: [
+ *     { asset: 'waterTank1', xRatio: 0.28, scale: 0.2 },
+ *     { asset: 'rooftopUtilityBox1', xRatio: 0.72, scale: 0.16 },
+ *   ],
+ *   B: [
+ *     { asset: 'rooftopUtilityBox2', xRatio: 0.32, scale: 0.16 },
+ *     { asset: 'waterTank2', xRatio: 0.76, scale: 0.18 },
+ *   ],
+ *   C: [
+ *     { asset: 'waterTank2', xRatio: 0.26, scale: 0.18 },
+ *     { asset: 'rooftopUtilityBox1', xRatio: 0.7, scale: 0.16 },
+ *   ],
+ * };
+ */
 
 type SkyVisualState = {
   topColor: number;
@@ -89,6 +178,7 @@ export class CityScene implements Scene {
   private readonly speedLines = new Graphics({ label: 'citySpeedLines' });
   private readonly dustBursts: Container[] = [];
   private readonly windowLights: Graphics[] = [];
+  private readonly facadeTextures: Texture[] = [];
   private activeTimeline: GsapTimeline | undefined;
   private moonSprite: Sprite | undefined;
   private context: gsap.Context | undefined;
@@ -229,7 +319,7 @@ export class CityScene implements Scene {
         }
 
         const nextRoof = rooftops[index + 1];
-        const jumpToNext = 'jumpToNext' in rooftop ? rooftop.jumpToNext : undefined;
+        const jumpToNext = rooftop.jumpToNext;
         if (!nextRoof || !jumpToNext) {
           throw new Error(`CityScene rooftop ${rooftop.id} is missing its next jump.`);
         }
@@ -315,6 +405,8 @@ export class CityScene implements Scene {
     this.clearImageSegments(this.farLayer, this.farSegments);
     this.clearImageSegments(this.midLayer, this.midSegments);
     this.clearImageSegments(this.frontLayer, this.frontSegments);
+    this.facadeTextures.forEach((texture) => texture.destroy(false));
+    this.facadeTextures.length = 0;
     this.dustBursts.length = 0;
     this.windowLights.length = 0;
     this.built = false;
@@ -384,6 +476,7 @@ export class CityScene implements Scene {
 
       return {
         ...rooftop,
+        roofY: rooftop.roofY + MOVIE_CONFIG.city.platformYOffset,
         x: rooftop.landingX - padding,
         width: runDistance + padding * 2,
         takeoffX: rooftop.landingX + runDistance,
@@ -401,7 +494,7 @@ export class CityScene implements Scene {
         return;
       }
 
-      const jumpToNext = 'jumpToNext' in rooftop ? rooftop.jumpToNext : undefined;
+      const jumpToNext = rooftop.jumpToNext;
       if (!jumpToNext) {
         throw new Error(`CityScene rooftop ${rooftop.id} is missing its next jump.`);
       }
@@ -691,11 +784,7 @@ export class CityScene implements Scene {
   private createPlatforms(): void {
     this.resolveRooftops().forEach(({ x, roofY: top, width, height, id }) => {
       const building = new Container({ label: `building${id}` });
-      building.addChild(new Graphics()
-        .rect(x, top, width, height)
-        .fill(COLORS.roof)
-        .rect(x - 5, top - 7, width + 10, 7)
-        .fill(COLORS.roofTop));
+      building.addChild(this.createRooftopFacade(id, x, top, width));
       for (let row = 0; row < Math.floor(height / 30); row += 1) {
         const windowLight = new Graphics()
           .rect(x + 12, top + 16 + row * 30, 8, 10)
@@ -705,6 +794,8 @@ export class CityScene implements Scene {
         this.windowLights.push(windowLight);
         building.addChild(windowLight);
       }
+      // Rooftop visual decorations are intentionally disabled.
+      // this.createRooftopDecorations(building, id, x, top, width);
       const labelText = new Text({
         text: `ROOF ${id}`,
         style: {
@@ -719,6 +810,112 @@ export class CityScene implements Scene {
       this.platforms.addChild(building);
     });
   }
+
+  private createRooftopFacade(
+    roofId: string,
+    x: number,
+    top: number,
+    width: number,
+  ): Container {
+    const facadeSpec = ROOFTOP_FACADES[roofId];
+    if (!facadeSpec) {
+      throw new Error(`Missing facade PNG configuration for rooftop ${roofId}.`);
+    }
+
+    const leftTopTexture = this.createFacadeTexture(facadeSpec.left, 'top');
+    const middleTopTexture = this.createFacadeTexture(facadeSpec.middle, 'top');
+    const rightTopTexture = this.createFacadeTexture(facadeSpec.right, 'top');
+    const leftBodyTexture = this.createFacadeTexture(facadeSpec.left, 'body');
+    const middleBodyTexture = this.createFacadeTexture(facadeSpec.middle, 'body');
+    const rightBodyTexture = this.createFacadeTexture(facadeSpec.right, 'body');
+    const facadeSourceWidth = leftTopTexture.width + middleTopTexture.width + rightTopTexture.width;
+    const facadeScale = width / facadeSourceWidth;
+    const facadeContainer = new Container({ label: `building${roofId}.facadeContainer` });
+
+    const middleX = leftTopTexture.width;
+    const rightX = middleX + middleTopTexture.width;
+    const requiredSourceHeight = Math.ceil(Math.max(0, (GAME_HEIGHT - top) / facadeScale));
+
+    // The top row is rendered once. Only the body below each cap is tiled.
+    const leftTop = new Sprite(leftTopTexture);
+    const middleTop = new TilingSprite({
+      texture: middleTopTexture,
+      width: middleTopTexture.width,
+      height: middleTopTexture.height,
+    });
+    const rightTop = new Sprite(rightTopTexture);
+    middleTop.position.x = middleX;
+    rightTop.position.x = rightX;
+
+    const leftBody = new TilingSprite({
+      texture: leftBodyTexture,
+      width: leftBodyTexture.width,
+      height: Math.max(1, requiredSourceHeight - facadeSpec.left.bodyStart),
+    });
+    const middleBody = new TilingSprite({
+      texture: middleBodyTexture,
+      width: middleBodyTexture.width,
+      height: Math.max(1, requiredSourceHeight - facadeSpec.middle.bodyStart),
+    });
+    const rightBody = new TilingSprite({
+      texture: rightBodyTexture,
+      width: rightBodyTexture.width,
+      height: Math.max(1, requiredSourceHeight - facadeSpec.right.bodyStart),
+    });
+
+    leftBody.position.y = facadeSpec.left.bodyStart;
+    middleBody.position.set(middleX, facadeSpec.middle.bodyStart);
+    rightBody.position.set(rightX, facadeSpec.right.bodyStart);
+
+    facadeContainer.addChild(leftTop, middleTop, rightTop, leftBody, middleBody, rightBody);
+    facadeContainer.position.set(Math.round(x), Math.round(top));
+    facadeContainer.scale.set(facadeScale);
+
+    return facadeContainer;
+  }
+
+  private createFacadeTexture(part: RooftopFacadePart, section: 'top' | 'body'): Texture {
+    const sourceTexture = this.cityAssets[part.asset];
+    const sectionY = section === 'top' ? part.frame.y : part.frame.y + part.bodyStart;
+    const sectionHeight = section === 'top' ? part.bodyStart : part.frame.height - part.bodyStart;
+    const frame = new Rectangle(
+      part.frame.x,
+      sectionY,
+      part.frame.width,
+      sectionHeight,
+    );
+    const texture = new Texture({
+      source: sourceTexture.source,
+      frame,
+      label: `cityFacade.${part.asset}.${section}`,
+    });
+    texture.source.scaleMode = 'nearest';
+    this.facadeTextures.push(texture);
+    return texture;
+  }
+
+  /*
+   * Rooftop visual decorations are temporarily disabled.
+   * Keep the implementation commented so it can be restored without changing
+   * platform geometry or gameplay staging.
+   *
+   * private createRooftopDecorations(
+   *   building: Container,
+   *   roofId: string,
+   *   x: number,
+   *   top: number,
+   *   width: number,
+   * ): void {
+   *   ROOFTOP_DECORATIONS[roofId]?.forEach((spec, index) => {
+   *     const decoration = new Sprite(this.cityAssets[spec.asset]);
+   *     decoration.label = `rooftopDecoration${roofId}${index}`;
+   *     decoration.anchor.set(0.5, 1);
+   *     decoration.scale.set(spec.scale * MOVIE_CONFIG.city.rooftopDecorationScale);
+   *     decoration.position.set(x + width * spec.xRatio, top);
+   *     building.addChild(decoration);
+   *   });
+   * }
+   */
 
   private createEffects(): void {
     this.speedLines

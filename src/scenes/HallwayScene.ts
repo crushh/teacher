@@ -1,55 +1,66 @@
 import { gsap } from 'gsap';
-import { Container, Graphics, Text } from 'pixi.js';
+import { Container, Graphics, Sprite, Text } from 'pixi.js';
 
 import { cameraShake } from '../animations/cameraShake';
 import { squash } from '../animations/squash';
 import { Book } from '../entities/Book';
-import { Door } from '../entities/Door';
+import type { HallwayAssets } from '../assets/hallwayAssets';
 import { GAME_HEIGHT, GAME_WIDTH, MOVIE_CONFIG } from '../game/config';
 import { Teacher } from '../entities/Teacher';
 import type { Scene, GsapTimeline } from './Scene';
 
 const COLORS = {
-  wall: 0x596b89,
-  wallDark: 0x3d4b69,
-  floor: 0x8f6558,
-  tile: 0xb6826b,
-  trim: 0xe2c29b,
   text: 0xf6f0d7,
   accent: 0xffc857,
-  speed: 0xffe4a6,
 } as const;
 
 export class HallwayScene implements Scene {
   readonly id = 'hallway';
   readonly root = new Container({ label: 'HallwayScene.root' });
   readonly book = new Book(318, 224);
-  readonly door = new Door(518, 305);
 
   private readonly teacher: Teacher;
   private readonly shakeRoot: Container;
-  private readonly dust = new Container({ label: 'hallwayLandingDust' });
+  private readonly hallwayAssets: HallwayAssets;
+  private readonly hallwayBg: Sprite;
+  private readonly impact = new Container({ label: 'hallwayLandingImpact' });
+  private readonly impactVisual: Sprite;
+  private readonly rollRoot = new Container({ label: 'hallwayRollEffect.root' });
+  private readonly rollVisual: Sprite;
+  private readonly dust = new Container({ label: 'hallwayResidualDust' });
+  private readonly dustVisual: Sprite;
   private readonly endingCard = new Container({ label: 'endingCard' });
   private activeTimeline: GsapTimeline | undefined;
   private context: gsap.Context | undefined;
   private built = false;
 
-  constructor(teacher: Teacher, shakeRoot: Container, sceneHost: Container) {
+  constructor(teacher: Teacher, shakeRoot: Container, sceneHost: Container, hallwayAssets: HallwayAssets) {
     this.teacher = teacher;
     this.shakeRoot = shakeRoot;
+    this.hallwayAssets = hallwayAssets;
+    this.hallwayBg = new Sprite(hallwayAssets.hallwayBg);
+    this.hallwayBg.label = 'hallwayBackground';
+    this.hallwayBg.position.set(0, 0);
+    this.hallwayBg.width = GAME_WIDTH;
+    this.hallwayBg.height = GAME_HEIGHT;
+    this.rollVisual = new Sprite(hallwayAssets.rollSwirl01);
+    this.rollVisual.anchor.set(0.5);
+    this.impactVisual = new Sprite(hallwayAssets.rollImpact);
+    this.impactVisual.anchor.set(0.5);
+    this.dustVisual = new Sprite(hallwayAssets.rollDust);
+    this.dustVisual.anchor.set(0.5);
+    this.impact.addChild(this.impactVisual);
+    this.rollRoot.addChild(this.rollVisual);
+    this.dust.addChild(this.dustVisual);
     sceneHost.addChild(this.root);
   }
 
   build(): void {
     if (this.built) return;
 
-    this.root.addChild(this.createBackground());
-    this.root.addChild(this.createLockers());
-    this.root.addChild(this.door.root);
-    this.root.addChild(this.createDoorLabel());
+    this.root.addChild(this.hallwayBg);
     this.root.addChild(this.book.root);
-    this.createDust();
-    this.root.addChild(this.dust);
+    this.root.addChild(this.impact, this.rollRoot, this.dust);
     this.createEndingCard();
     this.root.addChild(this.endingCard);
     this.built = true;
@@ -69,43 +80,142 @@ export class HallwayScene implements Scene {
       });
       this.activeTimeline = timeline;
 
-      timeline.set(this.root, { visible: true, alpha: 1 }, 0);
-      timeline.set(this.endingCard, { visible: true, alpha: 0 }, 0);
-      timeline.set(this.book.root, { x: 318, y: 224, rotation: 0, visible: false, alpha: 1 }, 0);
+      const hallway = MOVIE_CONFIG.hallway;
+      const landingAt = hallway.fallDuration;
+      const rollEndAt = hallway.rollStartAt + hallway.rollDuration;
+      const rollEndAppearAt = rollEndAt + hallway.residualDustDuration;
+      const bookDropAt = rollEndAppearAt + hallway.rollEndPauseDuration;
+      const walkOutAt = hallway.bookCatchAt + hallway.bookCatchSettleDuration;
+
+      timeline.addLabel('hallway:start', 0);
+      timeline.addLabel('fall:start', 0);
+      timeline.addLabel('hallway:landing', landingAt);
+      timeline.addLabel('roll:start', hallway.rollStartAt);
+      timeline.addLabel('roll:end', rollEndAt);
+      timeline.addLabel('rollEnd:show', rollEndAppearAt);
+      timeline.addLabel('book:drop', bookDropAt);
+      timeline.addLabel('book:catch', hallway.bookCatchAt);
+      timeline.addLabel('hallway:end', hallway.endingCardAt + hallway.endingCardDuration);
+
+      timeline.set(this.root, { visible: true, alpha: 1 }, 'hallway:start');
+      timeline.set(this.endingCard, { visible: true, alpha: 0 }, 'hallway:start');
+      timeline.set(this.book.root, { x: 318, y: 224, rotation: 0, visible: false, alpha: 1 }, 'hallway:start');
       timeline.set(this.teacher.root, {
-        x: MOVIE_CONFIG.hallway.fallStartX,
-        y: MOVIE_CONFIG.hallway.fallStartY,
+        x: hallway.fallStartX,
+        y: hallway.fallStartY,
         visible: false,
         alpha: 1,
-      }, 0);
-      timeline.call(() => this.teacher.setPose('fall'), [], 0);
-      timeline.set(this.teacher.root, { visible: true }, 0);
+      }, 'hallway:start');
+      timeline.set(this.teacher.visual, { x: 0, y: 0, rotation: 0 }, 'hallway:start');
+      timeline.set(this.teacher.visual.scale, { x: 1, y: 1 }, 'hallway:start');
+      timeline.set(this.impact, {
+        x: hallway.fallStartX,
+        y: hallway.groundY,
+        visible: false,
+        alpha: 1,
+      }, 'hallway:start');
+      timeline.set(this.impactVisual, { x: 0, y: hallway.impactVisualY, rotation: 0 }, 'hallway:start');
+      timeline.set(this.impactVisual.scale, { x: hallway.impactScale, y: hallway.impactScale }, 'hallway:start');
+      timeline.set(this.rollRoot, {
+        x: hallway.rollStartX,
+        y: hallway.groundY,
+        visible: false,
+        alpha: 1,
+      }, 'hallway:start');
+      timeline.set(this.rollVisual, { x: 0, y: hallway.rollVisualY, rotation: 0 }, 'hallway:start');
+      timeline.set(this.rollVisual.scale, { x: hallway.rollScale, y: hallway.rollScale }, 'hallway:start');
+      timeline.set(this.dust, {
+        x: hallway.rollEndX,
+        y: hallway.groundY,
+        visible: false,
+        alpha: 1,
+      }, 'hallway:start');
+      timeline.set(this.dustVisual, { x: 0, y: hallway.dustVisualY, rotation: 0 }, 'hallway:start');
+      timeline.set(this.dustVisual.scale, { x: hallway.dustScale, y: hallway.dustScale }, 'hallway:start');
+      timeline.set(this.dust.scale, { x: 1, y: 1 }, 'hallway:start');
+      timeline.call(() => this.teacher.setPose('fall'), [], 'fall:start');
+      timeline.set(this.teacher.root, { visible: true }, 'fall:start');
       timeline.to(this.teacher.root, {
-        y: MOVIE_CONFIG.hallway.landingY,
-        duration: 0.95,
-        ease: 'bounce.out',
-      }, 0);
-      timeline.call(() => this.teacher.setPose('idle'), [], 0.95);
-      timeline.add(squash(this.teacher.visual, 0.22, 0.2), 0.98);
-      timeline.add(cameraShake(this.shakeRoot, { strength: 5, duration: 0.16 }), 0.98);
-      timeline.set(this.dust, { x: 185, y: MOVIE_CONFIG.hallway.landingY, visible: true, alpha: 1 }, 0.98);
-      timeline.to(this.dust, { y: MOVIE_CONFIG.hallway.landingY - 14, alpha: 0, duration: 0.35, ease: 'power1.out' }, 0.98);
+        y: hallway.landingY,
+        duration: hallway.fallDuration,
+        ease: 'power2.in',
+      }, 'fall:start');
+      timeline.set(this.impact, { visible: true, alpha: 1 }, 'hallway:landing');
+      timeline.add(squash(this.teacher.visual, 0.12, hallway.landingImpactDuration), 'hallway:landing');
+      timeline.add(cameraShake(this.shakeRoot, {
+        strength: hallway.landingShakeStrength,
+        duration: hallway.landingImpactDuration,
+      }), 'hallway:landing');
+      timeline.to(this.impact, {
+        alpha: 0,
+        duration: hallway.landingImpactDuration,
+        ease: 'none',
+      }, 'hallway:landing');
+      timeline.call(() => this.startRollEffect(), [], 'roll:start');
+      timeline.to(this.rollRoot, {
+        x: hallway.rollEndX,
+        duration: hallway.rollDuration,
+        ease: 'power2.out',
+      }, 'roll:start');
 
-      const rollAt = MOVIE_CONFIG.hallway.rollStartAt;
-      const rollEnd = rollAt + MOVIE_CONFIG.hallway.rollDuration;
-      timeline.call(() => this.teacher.setPose('roll'), [], rollAt);
-      timeline.to(this.teacher.root, {
-        x: 312,
-        duration: MOVIE_CONFIG.hallway.rollDuration,
-        ease: 'power1.inOut',
-      }, rollAt);
-      timeline.to(this.teacher.visual, {
-        rotation: Math.PI * 2,
-        duration: MOVIE_CONFIG.hallway.rollDuration,
-        ease: 'power1.inOut',
-      }, rollAt);
-      timeline.set(this.teacher.visual, { rotation: 0 }, rollEnd);
-      timeline.call(() => this.teacher.setPose('idle'), [], rollEnd);
+      for (let frameIndex = 1; ; frameIndex += 1) {
+        const frameAt = hallway.rollStartAt + frameIndex * hallway.rollFrameDuration;
+        if (frameAt >= rollEndAt) break;
+
+        const frameTexture = frameIndex % 2 === 1
+          ? this.hallwayAssets.rollSwirl02
+          : this.hallwayAssets.rollSwirl01;
+        const pulse = frameIndex % 2 === 1;
+        const frameTweenDuration = Math.min(
+          hallway.rollFrameDuration * 0.5,
+          rollEndAt - frameAt,
+        );
+        timeline.call(() => {
+          this.rollVisual.texture = frameTexture;
+        }, [], frameAt);
+        timeline.to(this.rollVisual, {
+          y: hallway.rollVisualY + (pulse ? -1 : 0),
+          rotation: pulse ? 0.035 : -0.035,
+          duration: frameTweenDuration,
+          ease: 'sine.inOut',
+        }, frameAt);
+        timeline.to(this.rollVisual.scale, {
+          x: hallway.rollScale * (pulse ? 1.02 : 1),
+          y: hallway.rollScale * (pulse ? 0.98 : 1),
+          duration: frameTweenDuration,
+          ease: 'sine.inOut',
+        }, frameAt);
+        timeline.to(this.rollRoot, {
+          y: hallway.groundY - (pulse ? 2 : 0),
+          duration: frameTweenDuration,
+          ease: 'sine.inOut',
+        }, frameAt);
+      }
+      timeline.set(this.dust, {
+        x: hallway.rollEndX,
+        y: hallway.groundY,
+        visible: true,
+        alpha: 1,
+      }, 'roll:end');
+      timeline.set(this.dustVisual, { x: 0, y: hallway.dustVisualY, rotation: 0 }, 'roll:end');
+      timeline.set(this.dustVisual.scale, { x: hallway.dustScale, y: hallway.dustScale }, 'roll:end');
+      timeline.set(this.dust.scale, {
+        x: hallway.dustStartScale,
+        y: hallway.dustStartScale,
+      }, 'roll:end');
+      timeline.to(this.dust, {
+        alpha: 0,
+        duration: hallway.residualDustDuration,
+        ease: 'power1.out',
+      }, 'roll:end');
+      timeline.to(this.dust.scale, {
+        x: hallway.dustEndScale,
+        y: hallway.dustEndScale,
+        duration: hallway.residualDustDuration,
+        ease: 'power1.out',
+      }, 'roll:end');
+      timeline.set(this.dust, { visible: false, alpha: 1 }, 'rollEnd:show');
+      timeline.call(() => this.finishRoll(), [], 'rollEnd:show');
 
       timeline.set(this.book.root, {
         x: 318,
@@ -113,51 +223,38 @@ export class HallwayScene implements Scene {
         rotation: -0.16,
         visible: true,
         alpha: 1,
-      }, MOVIE_CONFIG.hallway.bookDropAt);
+      }, 'book:drop');
       timeline.to(this.book.root, {
         x: 312,
         y: 220,
         rotation: 0.9,
-        duration: MOVIE_CONFIG.hallway.bookCatchAt - MOVIE_CONFIG.hallway.bookDropAt,
+        duration: hallway.bookCatchAt - bookDropAt,
         ease: 'power2.in',
-      }, MOVIE_CONFIG.hallway.bookDropAt);
-      timeline.call(() => this.teacher.setPose('catch'), [], MOVIE_CONFIG.hallway.bookCatchAt);
+      }, 'book:drop');
+      timeline.call(() => this.teacher.setPose('walkBook'), [], 'book:catch');
       timeline.to(this.book.root, {
         x: 320,
         y: 224,
         rotation: 0,
-        duration: 0.18,
+        duration: hallway.bookCatchSettleDuration,
         ease: 'back.out(2)',
-      }, MOVIE_CONFIG.hallway.bookCatchAt);
-      timeline.call(() => this.teacher.setPose('holdBook'), [], MOVIE_CONFIG.hallway.bookCatchAt + 0.18);
+      }, 'book:catch');
 
       timeline.to(this.teacher.root, {
-        x: 442,
-        duration: 2.85,
-        ease: 'power1.inOut',
-      }, 3.45);
-      timeline.to(this.book.root, {
-        x: 450,
-        duration: 2.85,
-        ease: 'power1.inOut',
-      }, 3.45);
-      timeline.call(() => this.teacher.setPose('openDoor'), [], MOVIE_CONFIG.hallway.doorOpenAt);
-      timeline.call(() => this.door.open(), [], MOVIE_CONFIG.hallway.doorOpenAt);
-      timeline.to(this.teacher.root, {
-        x: 596,
-        duration: 1.25,
+        x: hallway.exitX,
+        duration: hallway.walkOutDuration,
         ease: 'power2.in',
-      }, MOVIE_CONFIG.hallway.entryAt);
+      }, walkOutAt);
       timeline.to(this.book.root, {
-        x: 604,
-        duration: 1.25,
+        x: hallway.exitX + 8,
+        duration: hallway.walkOutDuration,
         ease: 'power2.in',
-      }, MOVIE_CONFIG.hallway.entryAt);
+      }, walkOutAt);
       timeline.to(this.endingCard, {
         alpha: 1,
-        duration: 0.35,
+        duration: hallway.endingCardDuration,
         ease: 'power1.out',
-      }, 8.9);
+      }, hallway.endingCardAt);
     });
 
     if (!timeline) {
@@ -178,30 +275,6 @@ export class HallwayScene implements Scene {
         defaults: { overwrite: 'auto' },
       });
 
-      hallwayExitTL.set(this.teacher.root, {
-        x: 596,
-        y: MOVIE_CONFIG.hallway.landingY,
-        visible: true,
-        alpha: 1,
-      }, 0);
-      hallwayExitTL.set(this.book.root, {
-        x: 604,
-        y: 224,
-        rotation: 0,
-        visible: true,
-        alpha: 1,
-      }, 0);
-      hallwayExitTL.call(() => this.teacher.setPose('run'), [], 0);
-      hallwayExitTL.to(this.teacher.root, {
-        x: MOVIE_CONFIG.hallway.exitX,
-        duration: MOVIE_CONFIG.hallway.exitDuration,
-        ease: 'power1.in',
-      }, 0);
-      hallwayExitTL.to(this.book.root, {
-        x: MOVIE_CONFIG.hallway.exitX + 8,
-        duration: MOVIE_CONFIG.hallway.exitDuration,
-        ease: 'power1.in',
-      }, 0);
       hallwayExitTL.to(this.endingCard, {
         alpha: 0,
         duration: 0.18,
@@ -217,12 +290,11 @@ export class HallwayScene implements Scene {
 
   reset(): void {
     this.resetContainer(this.root, false);
-    this.resetContainer(this.dust, false);
+    this.resetVfx();
     this.resetContainer(this.endingCard, false);
     this.teacher.reset();
     this.resetTeacherForFall();
     this.book.reset();
-    this.door.reset();
   }
 
   isTeacherReset(): boolean {
@@ -251,60 +323,6 @@ export class HallwayScene implements Scene {
     this.built = false;
   }
 
-  private createBackground(): Graphics {
-    const background = new Graphics()
-      .rect(0, 0, GAME_WIDTH, GAME_HEIGHT)
-      .fill(COLORS.wall)
-      .rect(0, 286, GAME_WIDTH, 74)
-      .fill(COLORS.floor)
-      .rect(0, 276, GAME_WIDTH, 10)
-      .fill(COLORS.trim)
-      .rect(0, 300, GAME_WIDTH, 3)
-      .fill({ color: COLORS.tile, alpha: 0.6 });
-    for (let x = 0; x < GAME_WIDTH; x += 64) {
-      background.rect(x, 303, 2, 57).fill({ color: COLORS.tile, alpha: 0.65 });
-    }
-    return background;
-  }
-
-  private createLockers(): Container {
-    const lockers = new Container({ label: 'hallwayLockers' });
-    for (let i = 0; i < 7; i += 1) {
-      const locker = new Graphics()
-        .rect(28 + i * 53, 76, 47, 178)
-        .fill(i % 2 === 0 ? COLORS.wallDark : 0x465778)
-        .stroke({ color: COLORS.trim, width: 1, alpha: 0.55 })
-        .rect(34 + i * 53, 96, 31, 3)
-        .fill({ color: COLORS.trim, alpha: 0.45 })
-        .rect(55 + i * 53, 210, 7, 3)
-        .fill(COLORS.accent);
-      lockers.addChild(locker);
-    }
-    return lockers;
-  }
-
-  private createDoorLabel(): Text {
-    const label = new Text({
-      text: 'CLASSROOM  1-A',
-      style: {
-        fill: COLORS.text,
-        fontFamily: 'monospace',
-        fontSize: 9,
-        fontWeight: '700',
-      },
-    });
-    label.position.set(470, 186);
-    return label;
-  }
-
-  private createDust(): void {
-    for (let i = 0; i < 8; i += 1) {
-      this.dust.addChild(new Graphics()
-        .circle((i - 3.5) * 6, -2 - (i % 2) * 3, 2 + (i % 3))
-        .fill({ color: COLORS.speed, alpha: 0.85 }));
-    }
-  }
-
   private createEndingCard(): void {
     const card = new Graphics()
       .roundRect(170, 28, 300, 48, 5)
@@ -323,6 +341,63 @@ export class HallwayScene implements Scene {
     title.anchor.set(0.5);
     title.position.set(320, 52);
     this.endingCard.addChild(card, title);
+  }
+
+  private startRollEffect(): void {
+    const hallway = MOVIE_CONFIG.hallway;
+
+    this.teacher.root.visible = false;
+    this.impact.visible = false;
+    this.impact.alpha = 1;
+    this.rollRoot.position.set(hallway.rollStartX, hallway.groundY);
+    this.rollRoot.alpha = 1;
+    this.rollRoot.visible = true;
+    this.rollVisual.texture = this.hallwayAssets.rollSwirl01;
+    this.rollVisual.position.set(0, hallway.rollVisualY);
+    this.rollVisual.rotation = 0;
+    this.rollVisual.scale.set(hallway.rollScale, hallway.rollScale);
+  }
+
+  private finishRoll(): void {
+    const hallway = MOVIE_CONFIG.hallway;
+
+    this.teacher.root.position.set(hallway.rollEndX, hallway.landingY);
+    this.teacher.root.rotation = 0;
+    this.teacher.root.scale.set(1, 1);
+    this.teacher.root.alpha = 1;
+    this.teacher.visual.position.set(0, 0);
+    this.teacher.visual.rotation = 0;
+    this.teacher.visual.scale.set(1, 1);
+    this.teacher.setPose('rollEnd');
+    this.teacher.root.visible = true;
+    this.rollRoot.position.set(hallway.rollEndX, hallway.groundY);
+    this.rollRoot.visible = false;
+    this.rollRoot.alpha = 1;
+  }
+
+  private resetVfx(): void {
+    const hallway = MOVIE_CONFIG.hallway;
+
+    this.resetContainer(this.impact, false);
+    this.impact.alpha = 1;
+    this.impactVisual.position.set(0, hallway.impactVisualY);
+    this.impactVisual.rotation = 0;
+    this.impactVisual.scale.set(hallway.impactScale, hallway.impactScale);
+
+    this.resetContainer(this.rollRoot, false);
+    this.rollRoot.alpha = 1;
+    this.rollRoot.position.set(hallway.rollStartX, hallway.groundY);
+    this.rollVisual.texture = this.hallwayAssets.rollSwirl01;
+    this.rollVisual.position.set(0, hallway.rollVisualY);
+    this.rollVisual.rotation = 0;
+    this.rollVisual.scale.set(hallway.rollScale, hallway.rollScale);
+
+    this.resetContainer(this.dust, false);
+    this.dust.alpha = 1;
+    this.dust.position.set(hallway.rollEndX, hallway.groundY);
+    this.dustVisual.position.set(0, hallway.dustVisualY);
+    this.dustVisual.rotation = 0;
+    this.dustVisual.scale.set(hallway.dustScale, hallway.dustScale);
   }
 
   private resetContainer(container: Container, visible: boolean): void {
@@ -344,6 +419,7 @@ export class HallwayScene implements Scene {
     this.teacher.root.skew.set(0, 0);
     this.teacher.root.alpha = 1;
     this.teacher.root.visible = false;
+    this.teacher.setPose('fall');
   }
 }
 

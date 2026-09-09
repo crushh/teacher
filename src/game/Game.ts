@@ -3,6 +3,7 @@ import { gsap } from 'gsap';
 
 import { loadClassroomAssets, type ClassroomAssets } from '../assets/classroomAssets';
 import { loadCityAssets, type CityAssets } from '../assets/cityAssets';
+import { loadHallwayAssets, type HallwayAssets } from '../assets/hallwayAssets';
 import { createTuningPanel, type RuntimeResetChecks, type TuningPanel } from '../dev/createTuningPanel';
 import { Teacher } from '../entities/Teacher';
 import { ClassroomScene } from '../scenes/ClassroomScene';
@@ -52,11 +53,12 @@ export class Game {
 
     window.addEventListener('resize', this.handleResize, { passive: true });
     window.visualViewport?.addEventListener('resize', this.handleResize, { passive: true });
-    const [classroomAssets, cityAssets] = await Promise.all([
+    const [classroomAssets, cityAssets, hallwayAssets] = await Promise.all([
       loadClassroomAssets(),
       loadCityAssets(),
+      loadHallwayAssets(),
     ]);
-    this.createMovieRuntime(classroomAssets, cityAssets);
+    this.createMovieRuntime(classroomAssets, cityAssets, hallwayAssets);
     this.resize();
   }
 
@@ -85,14 +87,23 @@ export class Game {
     }
   }
 
-  private createMovieRuntime(classroomAssets: ClassroomAssets, cityAssets: CityAssets): void {
+  private createMovieRuntime(
+    classroomAssets: ClassroomAssets,
+    cityAssets: CityAssets,
+    hallwayAssets: HallwayAssets,
+  ): void {
     const teacher = new Teacher({
       x: MOVIE_CONFIG.teacher.startX,
       y: MOVIE_CONFIG.teacher.startY,
-    }, classroomAssets.teacher);
+    }, {
+      ...classroomAssets.teacher,
+      rollEnd: hallwayAssets.teacherRollEnd,
+    }, {
+      rollEnd: MOVIE_CONFIG.hallway.rollEndScale,
+    });
     const classroomScene = new ClassroomScene(teacher, this.sceneHost, classroomAssets.environment, this.mount);
     const cityScene = new CityScene(teacher, this.panRoot, this.shakeRoot, this.sceneHost, cityAssets);
-    const hallwayScene = new HallwayScene(teacher, this.shakeRoot, this.sceneHost);
+    const hallwayScene = new HallwayScene(teacher, this.shakeRoot, this.sceneHost, hallwayAssets);
     classroomScene.build();
     cityScene.build();
     hallwayScene.build();

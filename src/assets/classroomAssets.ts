@@ -28,6 +28,7 @@ export interface ClassroomPoseTextures {
   readonly run1: Texture;
   readonly run2: Texture;
   readonly jump: Texture;
+  readonly rollEnd?: Texture;
 }
 
 export interface ClassroomAssets {

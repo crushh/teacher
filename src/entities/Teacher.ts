@@ -24,6 +24,7 @@ export type TeacherPose =
   | 'jump'
   | 'fall'
   | 'roll'
+  | 'rollEnd'
   | 'catch'
   | 'holdBook'
   | 'openDoor';
@@ -51,6 +52,7 @@ export class Teacher {
   private readonly placeholder: Graphics;
   private readonly poseSprite: Sprite | undefined;
   private readonly poseTextures: ClassroomPoseTextures | undefined;
+  private readonly poseScales: Partial<Record<TeacherPose, number>>;
   private readonly initialRootPosition: Position;
   private readonly initialVisualPosition: Position = { x: 0, y: 0 };
   private pose: TeacherPose = 'idle';
@@ -61,16 +63,18 @@ export class Teacher {
       y: RUNTIME_CONFIG.teacher.startY,
     },
     poseTextures?: ClassroomPoseTextures,
+    poseScales: Partial<Record<TeacherPose, number>> = {},
   ) {
     this.initialRootPosition = { ...initialPosition };
     this.poseTextures = poseTextures;
+    this.poseScales = poseScales;
     this.placeholder = this.createPlaceholder();
     this.root.addChild(this.visual);
     if (poseTextures) {
       this.poseSprite = new Sprite(poseTextures.talk1);
       this.poseSprite.label = 'Teacher.poseSprite';
       this.poseSprite.anchor.set(0.5, 1);
-      this.poseSprite.scale.set(0.68);
+      this.poseSprite.scale.set(this.getPoseScale('idle'));
       this.visual.addChild(this.poseSprite, this.placeholder);
       this.placeholder.visible = false;
     } else {
@@ -89,7 +93,7 @@ export class Teacher {
       this.poseSprite.texture = this.poseTextures?.talk1 ?? this.poseSprite.texture;
       this.poseSprite.position.set(0, 0);
       this.poseSprite.rotation = 0;
-      this.poseSprite.scale.set(0.68);
+      this.poseSprite.scale.set(this.getPoseScale('idle'));
       this.poseSprite.alpha = 1;
       this.poseSprite.visible = true;
       this.placeholder.visible = false;
@@ -101,6 +105,7 @@ export class Teacher {
     const texture = this.poseTextures?.[poseTextureKey(pose)];
     if (this.poseSprite && texture) {
       this.poseSprite.texture = texture;
+      this.poseSprite.scale.set(this.getPoseScale(pose));
       this.poseSprite.visible = true;
       this.placeholder.visible = false;
       return;
@@ -173,6 +178,10 @@ export class Teacher {
     return placeholder;
   }
 
+  private getPoseScale(pose: TeacherPose): number {
+    return this.poseScales[pose] ?? 0.68;
+  }
+
   private resetContainer(container: Container, position: Position): void {
     container.position.set(position.x, position.y);
     container.rotation = 0;
@@ -214,6 +223,8 @@ function poseTint(pose: TeacherPose): number {
       return 0xffa6b8;
     case 'roll':
       return 0xd6b4ff;
+    case 'rollEnd':
+      return 0xffffff;
     case 'catch':
       return 0x9ff0ce;
     case 'holdBook':
@@ -255,6 +266,8 @@ function poseTextureKey(pose: TeacherPose): keyof ClassroomPoseTextures {
     case 'jump':
     case 'fall':
       return 'jump';
+    case 'rollEnd':
+      return 'rollEnd';
     case 'catch':
       return 'talk2';
     default:
