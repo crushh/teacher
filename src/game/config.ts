@@ -2,6 +2,11 @@ export const GAME_WIDTH = 640;
 export const GAME_HEIGHT = 360;
 export const LOGICAL_ASPECT_RATIO = GAME_WIDTH / GAME_HEIGHT;
 
+export const UI_CONFIG = {
+  // When false, click the scene to play/pause instead of using the controls.
+  showPlaybackControls: false,
+} as const;
+
 export const AUDIO_CONFIG = {
   master: 1.0,
   classroomAmbience: 0.35,

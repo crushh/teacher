@@ -1,5 +1,5 @@
 import type { PlaybackController, PlaybackSnapshot } from '../playback/PlaybackController';
-import type { CitySkyMode } from '../game/config';
+import { UI_CONFIG, type CitySkyMode } from '../game/config';
 
 export interface RuntimeResetChecks {
   panRoot: boolean;
@@ -23,6 +23,29 @@ export function createTuningPanel(
   getResetChecks: () => RuntimeResetChecks,
   skyTuning: SkyTuningControls,
 ): TuningPanel {
+  if (!UI_CONFIG.showPlaybackControls) {
+    const canvas = parent.querySelector('canvas');
+    const events = new AbortController();
+    const togglePlayback = (): void => {
+      if (controller.getSnapshot().state === 'playing') controller.pause();
+      else controller.play();
+    };
+    const previousTabIndex = canvas?.getAttribute('tabindex') ?? null;
+    if (canvas) canvas.tabIndex = 0;
+    canvas?.addEventListener('click', togglePlayback, { signal: events.signal });
+    canvas?.addEventListener('keydown', (event) => {
+      if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
+        event.preventDefault();
+        togglePlayback();
+      }
+    }, { signal: events.signal });
+    return { destroy(): void {
+      events.abort();
+      if (previousTabIndex === null) canvas?.removeAttribute('tabindex');
+      else canvas?.setAttribute('tabindex', previousTabIndex);
+    } };
+  }
+
   const panel = document.createElement('aside');
   panel.className = 'tuning-panel';
   panel.dataset.testid = 'runtime-controls';
