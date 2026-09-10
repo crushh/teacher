@@ -26,6 +26,7 @@ interface PlaybackControllerOptions {
   reset: () => void;
   minSpeed?: number;
   maxSpeed?: number;
+  onSeek?: (seeking: boolean) => void;
   onPlay?: () => void;
   onPause?: () => void;
   onResume?: () => void;
@@ -37,6 +38,7 @@ export class PlaybackController {
   private readonly resetRuntime: () => void;
   private readonly minSpeed: number;
   private readonly maxSpeed: number;
+  private readonly onSeek: ((seeking: boolean) => void) | undefined;
   private readonly onPlay: (() => void) | undefined;
   private readonly onPause: (() => void) | undefined;
   private readonly onResume: (() => void) | undefined;
@@ -54,6 +56,7 @@ export class PlaybackController {
     this.resetRuntime = options.reset;
     this.minSpeed = options.minSpeed ?? 0.25;
     this.maxSpeed = options.maxSpeed ?? 2;
+    this.onSeek = options.onSeek;
     this.onPlay = options.onPlay;
     this.onPause = options.onPause;
     this.onResume = options.onResume;
@@ -109,7 +112,7 @@ export class PlaybackController {
     this.setState('playing');
   }
 
-  restart(): Promise<void> {
+  restart(startAt = 0): Promise<void> {
     if (this.restartPromise) return this.restartPromise;
     if (this.state === 'loading' || this.state === 'error') return Promise.resolve();
 
@@ -120,9 +123,14 @@ export class PlaybackController {
         this.masterTimeline = undefined;
         this.resetRuntime();
         this.onReset?.(this.generation);
-        this.rebuildTimeline();
+        const timeline = this.rebuildTimeline();
         this.setState('ready');
         this.play();
+        if (Number.isFinite(startAt) && startAt > 0) {
+          // Render preceding scene/pose callbacks so previews have the same
+          // state as normal playback. A fresh timeline avoids stale tweens.
+          timeline.time(Math.min(startAt, timeline.duration()), false);
+        }
       })
       .catch((error: unknown) => {
         this.setState('error');
@@ -133,6 +141,30 @@ export class PlaybackController {
       });
 
     return this.restartPromise;
+  }
+
+  seek(time: number): void {
+    if (!Number.isFinite(time) || !this.masterTimeline ||
+      ['loading', 'resetting', 'error'].includes(this.state)) return;
+    const playing = this.state === 'playing';
+    const target = Math.max(0, Math.min(time, this.masterTimeline.duration()));
+    this.onSeek?.(true);
+    try {
+      // Rebuild from the beginning so imperative pose and scene callbacks also
+      // render correctly when scrubbing backwards across scene boundaries.
+      this.masterTimeline.kill();
+      this.resetRuntime();
+      const timeline = this.rebuildTimeline();
+      timeline.time(target, false);
+      timeline.pause();
+      this.setState('paused');
+    } catch (error) {
+      this.setState('error');
+      throw error;
+    } finally {
+      this.onSeek?.(false);
+    }
+    if (playing) this.resume();
   }
 
   setSpeed(value: number): void {
@@ -162,7 +194,7 @@ export class PlaybackController {
     };
   }
 
-  private rebuildTimeline(): void {
+  private rebuildTimeline(): GsapTimeline {
     const timeline = this.createTimeline();
 
     this.generation += 1;
@@ -171,6 +203,7 @@ export class PlaybackController {
     this.masterTimeline.eventCallback('onUpdate', () => this.notify());
     this.masterTimeline.eventCallback('onComplete', () => this.setState('finished'));
     this.notify();
+    return timeline;
   }
 
   private setState(state: PlaybackState): void {

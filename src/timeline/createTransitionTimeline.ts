@@ -40,6 +40,8 @@ export function createSceneTransitionTimeline(options: {
   onSwap?: () => void;
 }): GsapTimeline {
   const duration = options.duration ?? MOVIE_CONFIG.transition.duration;
+  const timingScale = duration / MOVIE_CONFIG.transition.duration;
+  const swapAt = 0.34 * timingScale;
   const timeline = gsap.timeline({
     id: `transition:${options.label}`,
     defaults: { overwrite: 'auto' },
@@ -49,19 +51,19 @@ export function createSceneTransitionTimeline(options: {
   timeline.set(options.effects.flash, { visible: true, alpha: 0 }, 0);
   timeline.to(options.effects.flash, {
     alpha: 1,
-    duration: MOVIE_CONFIG.transition.flashDuration,
+    duration: MOVIE_CONFIG.transition.flashDuration * timingScale,
     ease: 'power2.out',
-  }, 0.24);
-  timeline.set(options.from, { visible: false, alpha: 0 }, 0.34);
+  }, 0.24 * timingScale);
+  timeline.set(options.from, { visible: false, alpha: 0 }, swapAt);
   if (options.onSwap) {
-    timeline.call(options.onSwap, [], 0.34);
+    timeline.call(options.onSwap, [], swapAt);
   }
-  timeline.set(options.to, { visible: true, alpha: 1 }, 0.34);
+  timeline.set(options.to, { visible: true, alpha: 1 }, swapAt);
   timeline.to(options.effects.flash, {
     alpha: 0,
-    duration: 0.16,
+    duration: 0.16 * timingScale,
     ease: 'power1.in',
-  }, 0.34);
+  }, swapAt);
   timeline.set(options.effects.root, { visible: false, alpha: 1 }, duration);
 
   return timeline;

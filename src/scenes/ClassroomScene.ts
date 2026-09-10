@@ -80,7 +80,6 @@ export class ClassroomScene implements Scene {
     this.root.addChild(this.grayboxStudents);
     this.root.addChild(this.grayboxDesks);
     this.root.addChild(this.deskLayer);
-    this.root.addChild(this.createTeacherMark());
     this.createBellIndicator();
     this.root.addChild(this.bellIndicator);
     this.root.addChild(this.speedLines);
@@ -145,11 +144,12 @@ export class ClassroomScene implements Scene {
       classroomTimeline.set(this.teacher.root.scale, { x: 1, y: 1 }, 0);
       classroomTimeline.set(this.teacher.root, { visible: true }, 0);
       classroomTimeline.call(() => this.teacher.setPose('walkBook'), [], 0);
+      this.teacher.addWalkCycle(classroomTimeline, 0, classroom.entranceDuration);
       classroomTimeline.addLabel('teacher:enter', 0);
       classroomTimeline.to(this.teacher.root, {
         x: classroom.teachingX,
         duration: classroom.entranceDuration,
-        ease: 'power1.out',
+        ease: 'none',
       }, 0);
       classroomTimeline.to(this.teacher.visual, {
         y: -2,
@@ -287,7 +287,6 @@ export class ClassroomScene implements Scene {
       classroomTimeline.set(this.teacher.root, { visible: false }, classroom.windowExitAt);
       classroomTimeline.set(this.teacher.visual.scale, { x: 1, y: 1 }, classroom.windowExitAt);
       classroomTimeline.addLabel('classroom:end', classroom.windowExitAt);
-      classroomTimeline.call(() => this.audio?.stop('bell'), [], 'classroom:end');
       classroomTimeline.call(() => this.audio?.stop('bigJump'), [], 'classroom:end');
     });
 
@@ -524,10 +523,6 @@ export class ClassroomScene implements Scene {
         .fill(COLORS.desk));
     });
     return desks;
-  }
-
-  private createTeacherMark(): Text {
-    return this.createText('TEACHER  /  CLASSROOM', 42, 334, COLORS.accent);
   }
 
   private createBellIndicator(): void {

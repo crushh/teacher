@@ -18,6 +18,7 @@ export class AudioManager {
   private readonly fadeTimelines = new Set<GsapTimeline>();
   private masterVolume: number = AUDIO_CONFIG.master;
   private unlocked = false;
+  private seeking = false;
 
   constructor() {
     (Object.keys(AUDIO_ASSETS) as AudioId[]).forEach((id) => {
@@ -53,7 +54,12 @@ export class AudioManager {
     this.unlocked = true;
   }
 
+  setSeeking(seeking: boolean): void {
+    this.seeking = seeking;
+  }
+
   play(id: AudioId): void {
+    if (this.seeking) return;
     const channel = this.getChannel(id);
     this.prepareForPlayback(channel, false);
     this.startElement(channel);
@@ -138,9 +144,24 @@ export class AudioManager {
     return channel.level.value;
   }
 
+  /** Mute independently of channel levels so fades and resets preserve the mix. */
+  setMuted(muted: boolean): void {
+    this.channels.forEach(({ element }) => {
+      element.muted = muted;
+    });
+  }
+
   setMasterVolume(value: number): void {
     this.masterVolume = clamp01(value);
     this.channels.forEach((channel) => this.applyVolume(channel));
+  }
+
+  setPlaybackRate(id: AudioId, speed: number): void {
+    if (!Number.isFinite(speed)) return;
+    const element = this.getChannel(id).element;
+    // Follow the animation speed without turning the meow into a high squeal.
+    element.preservesPitch = true;
+    element.playbackRate = Math.min(2, Math.max(0.25, speed));
   }
 
   isUnlocked(): boolean {
@@ -158,6 +179,10 @@ export class AudioManager {
   }
 
   private startElement(channel: AudioChannel): void {
+    if (this.seeking) {
+      channel.wasPlayingBeforePause = channel.activeLoop;
+      return;
+    }
     // play() must remain synchronous here. We intentionally do not await it,
     // so a browser can associate the call with the Play button gesture.
     void channel.element.play().catch(() => undefined);

@@ -2,6 +2,7 @@ import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 
 import type { ClassroomPoseTextures } from '../assets/classroomAssets';
 import { RUNTIME_CONFIG } from '../game/config';
+import type { GsapTimeline } from '../scenes/Scene';
 
 export interface TeacherResetStatus {
   root: boolean;
@@ -140,6 +141,25 @@ export class Teacher {
     this.placeholder.visible = false;
   }
 
+  /** Schedule on the movie timeline so pause, speed and replay also control footsteps. */
+  addWalkCycle(timeline: GsapTimeline, startAt: number, duration: number, scaleOverride?: number): void {
+    const frames = this.poseTextures?.walkCycle;
+    if (!frames?.length) return;
+    const frameDuration = 0.1;
+    for (let index = 0; index * frameDuration < duration; index += 1) {
+      const texture = frames[index % frames.length]!;
+      timeline.call(() => {
+        if (!this.poseSprite || !this.poseTextures) return;
+        this.pose = 'walkBook';
+        this.poseSprite.texture = texture;
+        // Keep the new sheet in the same 256px coordinate space as the original poses.
+        this.poseSprite.scale.set((scaleOverride ?? this.getPoseScale('walkBook')) * this.poseTextures.walkBook.height / texture.height);
+        this.poseSprite.visible = true;
+        this.placeholder.visible = false;
+      }, [], startAt + index * frameDuration);
+    }
+  }
+
   getPose(): TeacherPose {
     return this.pose;
   }
@@ -262,7 +282,7 @@ function poseTint(pose: TeacherPose): number {
   }
 }
 
-function poseTextureKey(pose: TeacherPose): keyof ClassroomPoseTextures {
+function poseTextureKey(pose: TeacherPose): Exclude<keyof ClassroomPoseTextures, 'walkCycle'> {
   switch (pose) {
     case 'walkBook':
     case 'holdBook':

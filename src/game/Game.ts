@@ -1,4 +1,5 @@
 import { Application, Container } from 'pixi.js';
+import { RunningMusic } from '../audio/RunningMusic';
 import { gsap } from 'gsap';
 
 import { loadClassroomAssets, type ClassroomAssets } from '../assets/classroomAssets';
@@ -33,6 +34,7 @@ export class Game {
   private playbackController: PlaybackController | undefined;
   private tuningPanel: TuningPanel | undefined;
   private unsubscribeSkyTimeline: (() => void) | undefined;
+  private runningMusic: RunningMusic | undefined;
   private cityTimelineRange = { start: 0, end: 1 };
 
   constructor(mount: HTMLElement) {
@@ -67,6 +69,8 @@ export class Game {
   destroy(): void {
     this.audioManager?.reset();
     this.audioManager = undefined;
+    this.runningMusic?.destroy();
+    this.runningMusic = undefined;
     this.tuningPanel?.destroy();
     this.tuningPanel = undefined;
     this.unsubscribeSkyTimeline?.();
@@ -149,12 +153,16 @@ export class Game {
       reset: () => this.resetMovieState(),
       minSpeed: MOVIE_CONFIG.speed.min,
       maxSpeed: MOVIE_CONFIG.speed.max,
+      onSeek: (seeking) => this.audioManager?.setSeeking(seeking),
       onPlay: () => this.audioManager?.unlock(),
       onPause: () => this.audioManager?.pause(),
       onResume: () => this.audioManager?.resume(),
     });
     this.playbackController.initialize();
+    this.runningMusic = new RunningMusic(this.mount, (muted) => audioManager.setMuted(muted));
     this.unsubscribeSkyTimeline = this.playbackController.subscribe((snapshot) => {
+      this.audioManager?.setPlaybackRate('catMeow', snapshot.speed);
+      this.runningMusic?.update(snapshot, MOVIE_CONFIG.classroom.runStartAt, this.cityTimelineRange.end);
       this.cityScene?.updateSkyFromTimeline(
         normalizeTimelineTime(snapshot.time, this.cityTimelineRange.start, this.cityTimelineRange.end),
       );
@@ -167,6 +175,7 @@ export class Game {
         getMode: () => this.cityScene?.getSkyMode() ?? 'auto',
         setMode: (mode) => this.cityScene?.setSkyMode(mode),
       },
+      () => this.cityTimelineRange.start + (this.cityScene?.getCatPreviewTime() ?? 0),
     );
   }
 
@@ -196,16 +205,10 @@ export class Game {
       to: hallwayScene.root,
       effects: transitionEffects,
       label: 'city-to-hallway',
+      duration: 0.16,
+      onSwap: () => this.panRoot.position.set(0, 0),
     }));
     const hallwayTL = hallwayScene.createTimeline();
-    const hallwayExitTL = hallwayScene.createExitTimeline();
-    const hallwayToClassroomTransitionTL = transitionContext.add(() => createSceneTransitionTimeline({
-      from: hallwayScene.root,
-      to: classroomScene.root,
-      effects: transitionEffects,
-      label: 'hallway-to-classroom',
-      onSwap: () => this.resetMovieStateForLoopBoundary(),
-    }));
 
     const masterTimeline = createMasterTimeline([
       classroomTL,
@@ -213,9 +216,16 @@ export class Game {
       cityTL,
       cityToHallwayTL,
       hallwayTL,
-      hallwayExitTL,
-      hallwayToClassroomTransitionTL,
     ]);
+    // Reset at the repeat boundary without adding an exit or flash transition.
+    masterTimeline.eventCallback('onRepeat', () => this.resetMovieStateForLoopBoundary());
+    if (this.audioManager) {
+      // Fade across the transition without extending the classroom scene.
+      const bellFadeAt = classroomTL.startTime() + MOVIE_CONFIG.classroom.windowExitAt;
+      const bellFadeDuration = 2;
+      masterTimeline.add(this.audioManager.fade('bell', 0, bellFadeDuration), bellFadeAt);
+      masterTimeline.call(() => this.audioManager?.stop('bell'), [], bellFadeAt + bellFadeDuration);
+    }
     this.cityTimelineRange = {
       start: cityTL.startTime(),
       end: cityTL.startTime() + cityTL.duration(),
@@ -245,6 +255,7 @@ export class Game {
     this.cityScene?.reset();
     this.hallwayScene?.reset();
     this.classroomScene?.reset();
+    this.transitionEffects?.reset();
   }
 
   private getResetChecks(): RuntimeResetChecks {

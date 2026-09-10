@@ -75,151 +75,43 @@ body {
   touch-action: none;
 }
 
-.tuning-panel {
+/* Slim pixel playback strip: keep the scene in focus. */
+.player-hud {
   position: absolute;
-  right: 18px;
-  bottom: 18px;
-  width: min(292px, calc(100vw - 36px));
-  padding: 15px;
-  border: 1px solid rgba(125, 165, 198, 0.62);
-  border-radius: 8px;
-  background: rgba(8, 14, 23, 0.94);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.32);
+  z-index: 5;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(340px, calc(100% - 24px));
+  padding: 3px 6px;
+  border: 1px solid #8491b060;
+  background: #131a30a6;
   font-family: monospace;
-  backdrop-filter: blur(10px);
+  transition: background 150ms;
 }
-
-.tuning-panel__header,
-.tuning-panel__progress-label,
-.tuning-panel__checks,
-.tuning-panel__speed {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.tuning-panel__header {
-  align-items: flex-start;
-  margin-bottom: 12px;
-}
-
-.tuning-panel__eyebrow {
-  margin: 0 0 3px;
-  color: #57c7ff;
-  font-size: 9px;
-  letter-spacing: 1px;
-}
-
-.tuning-panel h1 {
-  margin: 0;
-  color: #f6f0d7;
-  font: 700 15px/1.2 monospace;
-}
-
-.tuning-panel__state {
-  padding: 4px 6px;
-  border: 1px solid rgba(110, 231, 183, 0.45);
-  border-radius: 3px;
-  color: #6ee7b7;
-  font-size: 9px;
-}
-
-.tuning-panel__buttons {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 5px;
-  margin-bottom: 12px;
-}
-
-.tuning-panel button {
-  min-height: 30px;
-  padding: 5px 4px;
-  border: 1px solid #304761;
-  border-radius: 3px;
-  background: #162437;
-  color: #f6f0d7;
-  cursor: pointer;
-  font: 700 10px monospace;
-}
-
-.tuning-panel button:hover:not(:disabled),
-.tuning-panel button:focus-visible {
-  border-color: #ffc857;
-  color: #ffc857;
-}
-
-.tuning-panel button:disabled {
-  cursor: not-allowed;
-  opacity: 0.36;
-}
-
-.tuning-panel__speed {
-  margin-bottom: 12px;
-  color: #91a8b9;
-  font-size: 10px;
-}
-
-.tuning-panel__sky {
-  margin-bottom: 12px;
-  color: #91a8b9;
-  font-size: 10px;
-}
-
-.tuning-panel__sky-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 5px;
-}
-
-.tuning-panel__sky-buttons {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 5px;
-}
-
-.tuning-panel__sky-buttons button[data-active="true"] {
-  border-color: #ffc857;
-  color: #ffc857;
-}
-
-.tuning-panel__speed input {
-  width: 118px;
-  accent-color: #ffc857;
-}
-
-.tuning-panel output {
-  color: #f6f0d7;
-  font-size: 10px;
-}
-
-.tuning-panel__progress {
-  margin-bottom: 10px;
-}
-
-.tuning-panel__progress-label,
-.tuning-panel__checks {
-  margin-bottom: 5px;
-  color: #91a8b9;
-  font-size: 9px;
-}
-
-.tuning-panel progress {
-  display: block;
-  width: 100%;
-  height: 5px;
-  accent-color: #57c7ff;
-}
-
-.tuning-panel__checks output.is-passed {
-  color: #6ee7b7;
-}
-
-.tuning-panel__meta {
-  margin: 0;
-  color: #6f8495;
-  font-size: 9px;
+.player-hud:hover, .player-hud:focus-within { background: #131a30eb; }
+.player-hud__status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.player-hud__controls { display: flex; align-items: center; gap: 8px; }
+.player-hud button { flex-shrink: 0; width: 30px; height: 30px; padding: 0; border: 0; background: transparent; color: #dbe4f8; font: 20px monospace; cursor: pointer; }
+.player-hud .player-hud__play { color: #ffd578; font-size: 16px; }
+.player-hud button:hover:not(:disabled) { color: #fff0bb; background: #ffffff12; }
+.player-hud button:active:not(:disabled) { transform: translateY(1px); }
+.player-hud button:disabled { opacity: .45; cursor: wait; }
+.player-hud :focus-visible { outline: 1px solid #fff0bb; outline-offset: 2px; }
+.player-hud__track { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.player-hud__time { order: 1; flex-shrink: 0; font-size: 9px; }
+.player-hud__time output { color: #f6e7c9; font-variant-numeric: tabular-nums; }
+.player-hud input { --progress: 0%; appearance: none; display: block; min-width: 0; width: 100%; height: 28px; margin: 0; background: transparent; cursor: pointer; touch-action: none; }
+.player-hud input::-webkit-slider-runnable-track { height: 3px; background: linear-gradient(to right, #ffd578 var(--progress), #94a2bc66 var(--progress)); }
+.player-hud input::-webkit-slider-thumb { appearance: none; width: 7px; height: 11px; margin-top: -4px; border: 1px solid #fff0bb; border-radius: 0; background: #ffd578; }
+.player-hud input::-moz-range-track { height: 3px; background: #94a2bc66; }
+.player-hud input::-moz-range-progress { height: 3px; background: #ffd578; }
+.player-hud input::-moz-range-thumb { width: 5px; height: 9px; border: 1px solid #fff0bb; border-radius: 0; background: #ffd578; }
+.dialogue-overlay { bottom: 64px; }
+@media (pointer: coarse) {
+  .player-hud button { width: 36px; height: 36px; }
+  .player-hud input { height: 36px; }
+  .dialogue-overlay { bottom: 70px; }
 }
 
 .runtime-error {
@@ -249,10 +141,21 @@ body {
   color: #c5b8c7;
 }
 
-@media (max-width: 680px) {
-  .tuning-panel {
-    right: 10px;
-    bottom: 10px;
-    width: min(292px, calc(100vw - 20px));
-  }
+.music-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
+  padding: 9px 12px;
+  border: 1px solid #ffcf66;
+  border-radius: 3px;
+  background: rgba(13, 22, 34, 0.9);
+  color: #ffcf66;
+  font: 700 12px/1.3 monospace;
+  cursor: pointer;
+}
+
+.music-toggle:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
 }

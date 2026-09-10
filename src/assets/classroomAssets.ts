@@ -1,4 +1,4 @@
-import { Assets, Texture } from 'pixi.js';
+import { Assets, Rectangle, Texture } from 'pixi.js';
 
 import classroomDoorCloseUrl from './classroom/classroom_door_close.png';
 import classroomDoorOpenUrl from './classroom/classroom_door_open.png';
@@ -14,11 +14,13 @@ import teacherRun02Url from './cleaned/teacher/teacher_run_02.png';
 import teacherTalk01Url from './cleaned/teacher/teacher_talk_01.png';
 import teacherTalk02Url from './cleaned/teacher/teacher_talk_02.png';
 import teacherWalkBookUrl from './cleaned/teacher/teacher_walk_book_01.png';
+import teacherWalkCycleUrl from './classroom/teacher_walk_book_cycle.png';
 
 import { configurePixelTexture, removeCheckerboard } from '../game/pixel';
 
 export interface ClassroomPoseTextures {
   readonly walkBook: Texture;
+  readonly walkCycle?: readonly Texture[];
   readonly putBook: Texture;
   readonly talk1: Texture;
   readonly talk2: Texture;
@@ -53,6 +55,13 @@ async function loadCutoutTexture(url: string): Promise<Texture> {
 }
 
 export async function loadClassroomAssets(): Promise<ClassroomAssets> {
+  const walkSheet = await loadCutoutTexture(teacherWalkCycleUrl);
+  const cellWidth = Math.floor(walkSheet.width / 4);
+  const cellHeight = Math.floor(walkSheet.height / 2);
+  const walkCycle = Array.from({ length: 8 }, (_, index) => new Texture({
+    source: walkSheet.source,
+    frame: new Rectangle((index % 4) * cellWidth, Math.floor(index / 4) * cellHeight, cellWidth, cellHeight),
+  }));
   const [doorOpen, doorClosed, deskBooksArtwork, deskEmptyArtwork, walkBook, putBook, talk1, talk2, blackboard, lookClock, react, run1, run2, jump] =
     await Promise.all([
       loadTexture(classroomDoorOpenUrl),
@@ -82,6 +91,7 @@ export async function loadClassroomAssets(): Promise<ClassroomAssets> {
     },
     teacher: {
       walkBook,
+      walkCycle,
       putBook,
       talk1,
       talk2,

@@ -15,6 +15,7 @@ import {
 } from '../game/config';
 import { Teacher } from '../entities/Teacher';
 import type { AudioManager } from '../audio/AudioManager';
+import { RooftopCat } from '../entities/RooftopCat';
 import type { Scene, GsapTimeline } from './Scene';
 
 const COLORS = {
@@ -144,7 +145,26 @@ type SkyVisualState = {
   cityTintStrength: number;
 };
 
+// Positions and widths are in source-city pixels, so each sign stays attached
+// to its building when the layer scale or vertical layout changes.
+// Keep the background sparse and reserve assets 0 and 1 for the run rooftops.
+const CITY_SIGNS = {
+  mid: [
+    { asset: 8, x: 1020, y: 430, width: 44 },
+  ],
+  front: [
+    { asset: 3, x: 180, y: 387, width: 186 },
+    { asset: 9, x: 1190, y: 392, width: 164 },
+    { asset: 7, x: 1670, y: 326, width: 188 },
+  ],
+} as const;
+
 const SKY_BAND_COUNT = 60;
+
+const ROOFTOP_BILLBOARDS: Record<string, { asset: number; xRatio: number; width: number }> = {
+  A: { asset: 0, xRatio: 0.52, width: 200 },
+  B: { asset: 1, xRatio: 0.5, width: 210 },
+};
 
 export class CityScene implements Scene {
   readonly id = 'city';
@@ -152,12 +172,15 @@ export class CityScene implements Scene {
 
   private readonly teacher: Teacher;
   private readonly audio: AudioManager | undefined;
+  private readonly cat: RooftopCat;
   private readonly cityAssets: CityAssets;
   private readonly panRoot: Container;
   private readonly shakeRoot: Container;
   private readonly skyContainer = new Container({ label: 'skyContainer' });
   private readonly proceduralSky = new Container({ label: 'proceduralSky' });
   private readonly starLayer = new Container({ label: 'stars' });
+  private readonly fireworks = new Graphics({ label: 'distantFireworks' });
+  private readonly fireworkClock = { time: 0 };
   private readonly cloudContainer = new Container({ label: 'cloudContainer' });
   private readonly skyGradientBands: Graphics[] = [];
   private readonly cloudMotion = { x: 0 };
@@ -166,6 +189,7 @@ export class CityScene implements Scene {
   private readonly frontCityFilter = new ColorMatrixFilter();
   private readonly farLayer = new Container({ label: 'farLayer' });
   private readonly midLayer = new Container({ label: 'midLayer' });
+  private creditsBillboard: Container | undefined;
   private readonly frontLayer = new Container({ label: 'frontLayer' });
   private readonly farSegments: [Container, Container] = [
     new Container({ label: 'farLayer.segmentA' }),
@@ -211,6 +235,7 @@ export class CityScene implements Scene {
   ) {
     this.teacher = teacher;
     this.audio = audio;
+    this.cat = new RooftopCat(cityAssets.cat);
     this.cityAssets = cityAssets;
     this.panRoot = panRoot;
     this.shakeRoot = shakeRoot;
@@ -242,6 +267,26 @@ export class CityScene implements Scene {
       'front',
       MOVIE_CONFIG.city.parallax.front,
     );
+    // Keep placement in skyline source pixels; only the artwork is reduced.
+    // The two portrait signs sit on separate passes of the same roof.
+    const credits = new Container({ label: 'cityCreditsSigns' });
+    credits.scale.set(MOVIE_CONFIG.city.parallax.mid.scale);
+    credits.y = Math.round(GAME_HEIGHT * MOVIE_CONFIG.city.layout.mid.yRatio);
+    credits.tint = 0xb0c3dc;
+    const roofCenterX = 500;
+    const roofY = 310;
+    this.cityAssets.producerBillboards.forEach((texture, index) => {
+      const producer = new Sprite(texture);
+      producer.label = index === 0 ? 'directorCaoYuBillboard' : 'technicalShuiZhenYangBillboard';
+      producer.anchor.set(0.5, 1);
+      producer.scale.set(280 / texture.width);
+      const buildingSpacing = this.midSegmentWidth / MOVIE_CONFIG.city.parallax.mid.scale;
+      producer.position.set(roofCenterX + (index === 0 ? -buildingSpacing : buildingSpacing), roofY);
+      credits.addChild(producer);
+    });
+    credits.visible = false;
+    this.creditsBillboard = credits;
+    this.midLayer.addChild(credits);
     this.layoutParallaxLayers();
     this.attachCityAtmosphereFilters();
     this.applySkyVisuals();
@@ -250,6 +295,7 @@ export class CityScene implements Scene {
     this.createPlatforms();
     this.applySkyVisuals();
     this.createEffects();
+    this.root.addChild(this.cat.root);
     this.root.addChild(this.effects);
     this.root.addChild(this.createLabel());
     this.built = true;
@@ -315,6 +361,15 @@ export class CityScene implements Scene {
         sceneTimeline.add(roofRun, actionStart);
         sceneTimeline.call(() => this.audio?.playLoop('asphaltRun'), [], runLabel);
 
+        if (rooftop.id === MOVIE_CONFIG.city.catEncounter.rooftopId) {
+          const encounter = MOVIE_CONFIG.city.catEncounter;
+          const startleAt = actionStart + rooftop.runDuration * encounter.runProgress;
+          const startleX = rooftop.landingX + rooftop.runDistance * encounter.runProgress
+            + encounter.startleDistance;
+          sceneTimeline.add(this.cat.createTimeline(startleX, rooftop.roofY), startleAt - encounter.entryDuration);
+          sceneTimeline.call(() => this.audio?.play('catMeow'), [], startleAt);
+        }
+
         const jumpStart = actionStart + rooftop.runDuration;
         sceneTimeline.addLabel(jumpLabel, jumpStart);
         sceneTimeline.call(() => this.audio?.stop('asphaltRun'), [], jumpLabel);
@@ -363,6 +418,29 @@ export class CityScene implements Scene {
       });
 
       const cityDuration = this.getCityDuration(rooftops);
+      if (this.creditsBillboard) {
+        const { speed, scale } = MOVIE_CONFIG.city.parallax.mid;
+        // Choose the building pass nearest the middle of the run. This single
+        // sign moves continuously; it never wraps with the tiled skyline.
+        const localX = 450 * scale;
+        const pass = Math.max(1, Math.round(
+          (speed * cityDuration / 2 + GAME_WIDTH / 2 - localX - 500 * scale)
+          / this.midSegmentWidth,
+        ));
+        const startX = localX + pass * this.midSegmentWidth;
+        sceneTimeline.set(this.creditsBillboard, { visible: true }, 0);
+        sceneTimeline.fromTo(this.creditsBillboard, { x: startX }, {
+          x: startX - speed * cityDuration,
+          duration: cityDuration,
+          ease: 'none',
+        }, 0);
+      }
+      sceneTimeline.fromTo(this.fireworkClock, { time: 0 }, {
+        time: cityDuration,
+        duration: cityDuration,
+        ease: 'none',
+        onUpdate: () => this.drawFireworks(),
+      }, 0);
       sceneTimeline.to(this.cloudMotion, {
         x: -MOVIE_CONFIG.city.sky.cloudSpeed * cityDuration,
         duration: cityDuration,
@@ -391,25 +469,14 @@ export class CityScene implements Scene {
       // carry the gameplay farther to the right. The camera moves by shifting
       // the shared world root left; Teacher.root.x itself remains gameplay data.
       const cameraFollow = { progress: 0 };
-      const cameraFollowDuration = Math.max(
-        0,
-        cityDuration - MOVIE_CONFIG.city.cameraResetDuration,
-      );
       sceneTimeline.to(cameraFollow, {
         progress: 1,
-        duration: cameraFollowDuration,
+        duration: cityDuration,
         ease: 'none',
         onUpdate: () => this.updateCameraFollow(),
       }, 0);
-      sceneTimeline.to(this.panRoot, {
-        x: 0,
-        duration: MOVIE_CONFIG.city.cameraResetDuration,
-        ease: 'power1.out',
-        onUpdate: () => this.updateSkyCameraCompensation(),
-        onComplete: () => {
-          this.skyContainer.x = 0;
-        },
-      }, cameraFollowDuration);
+      // The shared camera is reset by the scene swap, after this world is hidden.
+
     });
 
     if (!timeline) {
@@ -429,12 +496,16 @@ export class CityScene implements Scene {
     this.resetImageSegments(this.frontLayer, this.frontSegments, this.frontSegmentWidth);
     this.resetContainer(this.platforms, true);
     this.dustBursts.forEach((dust) => this.resetContainer(dust, false));
+    this.cat.reset();
+    if (this.creditsBillboard) this.creditsBillboard.visible = false;
   }
 
   dispose(): void {
     this.activeTimeline?.kill();
     this.context?.revert();
     this.activeTimeline = undefined;
+    this.creditsBillboard?.destroy({ children: true });
+    this.creditsBillboard = undefined;
     this.context = undefined;
     this.root.removeChildren();
     this.clearImageSegments(this.farLayer, this.farSegments);
@@ -449,6 +520,18 @@ export class CityScene implements Scene {
 
   getSkyMode(): CitySkyMode {
     return this.skyMode;
+  }
+
+  getCatPreviewTime(): number {
+    let at: number = MOVIE_CONFIG.city.initialLandingAt;
+    for (const rooftop of this.resolveRooftops()) {
+      if (rooftop.id === MOVIE_CONFIG.city.catEncounter.rooftopId) {
+        return Math.max(0, at + rooftop.runDuration * MOVIE_CONFIG.city.catEncounter.runProgress
+          - MOVIE_CONFIG.city.catEncounter.entryDuration - 0.4);
+      }
+      at += rooftop.runDuration + (rooftop.jumpToNext?.duration ?? 0);
+    }
+    return 0;
   }
 
   getSkyState(): CitySkyState {
@@ -669,6 +752,7 @@ export class CityScene implements Scene {
       this.skyContainer.addChild(
         this.proceduralSky,
         this.starLayer,
+        this.fireworks,
         this.moonSprite,
         this.cloudContainer,
       );
@@ -676,6 +760,32 @@ export class CityScene implements Scene {
     }
 
     return this.skyContainer;
+  }
+
+  private drawFireworks(): void {
+    this.fireworks.clear();
+    // Sparse chrysanthemum bursts, drawn as pixel sparks behind the skyline.
+    const bursts = [
+      { x: 130, y: 78, radius: 32, color: 0xffce83, offset: 0 },
+      { x: 310, y: 54, radius: 27, color: 0xff9cba, offset: 1.35 },
+      { x: 435, y: 104, radius: 23, color: 0x9cdde8, offset: 2.7 },
+    ];
+    for (const burst of bursts) {
+      const phase = ((this.fireworkClock.time + burst.offset) % 4.8) / 3.2;
+      if (phase >= 1) continue;
+      const spread = 1 - Math.pow(1 - phase, 3);
+      const opacity = Math.min(1, phase * 10) * Math.pow(1 - phase, 0.7);
+      for (let ray = 0; ray < 24; ray += 1) {
+        const angle = ray * Math.PI * 2 / 24;
+        for (let spark = 0; spark < 3; spark += 1) {
+          const radius = burst.radius * spread * (1 - spark * 0.14);
+          const x = Math.round(burst.x + Math.cos(angle) * radius);
+          const y = Math.round(burst.y + Math.sin(angle) * radius + phase * phase * 13);
+          this.fireworks.rect(x, y, spark === 0 ? 2 : 1, 2)
+            .fill({ color: burst.color, alpha: opacity * (0.8 - spark * 0.2) });
+        }
+      }
+    }
   }
 
   private createStars(): void {
@@ -727,6 +837,7 @@ export class CityScene implements Scene {
     });
 
     this.starLayer.alpha = this.skyVisual.starAlpha;
+    this.fireworks.alpha = normalizeRange(this.skyVisual.starAlpha, 0.15, 0.88);
     this.cloudContainer.tint = this.skyVisual.cloudColor;
     this.cloudContainer.alpha = this.skyVisual.cloudAlpha;
     if (this.moonSprite) this.moonSprite.alpha = this.skyVisual.moonAlpha;
@@ -753,6 +864,8 @@ export class CityScene implements Scene {
     Object.assign(this.skyVisual, MOVIE_CONFIG.city.sky.states.day);
     this.skyState = 'day';
     this.cloudMotion.x = 0;
+    this.fireworkClock.time = 0;
+    this.drawFireworks();
     this.updateCloudPosition();
     this.applySkyVisuals();
   }
@@ -811,6 +924,19 @@ export class CityScene implements Scene {
       sprite.position.set(0, 0);
       sprite.scale.set(options.scale);
       segment.addChild(sprite);
+      const signs = layerName === 'mid' ? CITY_SIGNS.mid
+        : layerName === 'front' ? CITY_SIGNS.front : [];
+      const signGroup = new Container({ label: `${layerName}Signs${segmentIndex}` });
+      signGroup.scale.set(options.scale);
+      signs.forEach(({ asset, x, y, width }) => {
+        const sign = new Sprite(this.cityAssets.signs[asset]);
+        sign.label = `citySign${asset + 1}`;
+        sign.anchor.set(0.5, 1);
+        sign.scale.set(width / sign.texture.width);
+        sign.position.set(x, y);
+        signGroup.addChild(sign);
+      });
+      segment.addChild(signGroup);
       layer.addChild(segment);
       return sprite;
     });
@@ -851,6 +977,8 @@ export class CityScene implements Scene {
       }
 
       sprite.y = Math.round(y);
+      const signs = segment.children[1];
+      if (signs) signs.y = sprite.y;
     });
   }
 
@@ -888,7 +1016,18 @@ export class CityScene implements Scene {
         this.windowLights.push(windowLight);
         building.addChild(windowLight);
       }
-      // Rooftop visual decorations are intentionally disabled.
+      const billboardSpec = ROOFTOP_BILLBOARDS[id];
+      if (billboardSpec) {
+        const billboard = new Sprite(this.cityAssets.signs[billboardSpec.asset]);
+        billboard.label = `rooftopBillboard${id}`;
+        billboard.anchor.set(0.5, 1);
+        billboard.scale.set(billboardSpec.width / billboard.texture.width);
+        billboard.position.set(Math.round(width * billboardSpec.xRatio), top + 2);
+        // Stay in the building's world space, behind the teacher's sceneHost
+        // layer, so the runner naturally occludes the sign while passing it.
+        building.addChild(billboard);
+      }
+      // Utility boxes and water tanks remain disabled.
       // this.createRooftopDecorations(building, id, x, top, width);
       const labelText = new Text({
         text: `ROOF ${id}`,
