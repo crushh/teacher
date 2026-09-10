@@ -2,6 +2,22 @@ export const GAME_WIDTH = 640;
 export const GAME_HEIGHT = 360;
 export const LOGICAL_ASPECT_RATIO = GAME_WIDTH / GAME_HEIGHT;
 
+export const AUDIO_CONFIG = {
+  master: 1.0,
+  classroomAmbience: 0.35,
+  door: 0.45,
+  bell: 0.65,
+  hallwayRun: 0.35,
+  asphaltRun: 0.30,
+  smallJump: 0.45,
+  bigJump: 0.55,
+  landing: 0.60,
+  roll: 0.45,
+  falling: 0.45,
+  catch: 0.55,
+  whoosh: 0.40,
+} as const;
+
 export const RENDERER_CONFIG = {
   width: GAME_WIDTH,
   height: GAME_HEIGHT,
@@ -64,7 +80,9 @@ export const MOVIE_CONFIG = {
     lookClockAt: 5.12,
     dialogueEndClassAt: 5.34,
     dialogueEndClassEndAt: 6.02,
-    bellAt: 6.12,
+    // The bell should land on the final frame of the end-of-class line
+    // shown in the tuning-panel capture, before the reaction pose starts.
+    bellAt: 5.08,
     reactionEndAt: 6.48,
     runStartAt: 6.48,
     windowJumpAt: 7.35,

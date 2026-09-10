@@ -6,6 +6,7 @@ import type { ClassroomEnvironmentTextures } from '../assets/classroomAssets';
 import { jumpTo } from '../animations/jump';
 import { GAME_HEIGHT, GAME_WIDTH, MOVIE_CONFIG } from '../game/config';
 import { Teacher } from '../entities/Teacher';
+import type { AudioManager } from '../audio/AudioManager';
 import { createDialogueOverlay, type DialogueOverlay } from '../ui/DialogueOverlay';
 import type { Scene, GsapTimeline } from './Scene';
 
@@ -34,6 +35,7 @@ export class ClassroomScene implements Scene {
 
   private readonly teacher: Teacher;
   private readonly environmentTextures: ClassroomEnvironmentTextures;
+  private readonly audio: AudioManager | undefined;
   private readonly dialogue: DialogueOverlay | undefined;
   private readonly backgroundLayer = new Container({ label: 'backgroundLayer' });
   private readonly deskLayer = new Container({ label: 'deskLayer' });
@@ -54,9 +56,11 @@ export class ClassroomScene implements Scene {
     sceneHost: Container,
     environmentTextures: ClassroomEnvironmentTextures,
     dialogueHost?: HTMLElement,
+    audio?: AudioManager,
   ) {
     this.teacher = teacher;
     this.environmentTextures = environmentTextures;
+    this.audio = audio;
     this.dialogue = dialogueHost ? createDialogueOverlay(dialogueHost) : undefined;
     this.grayboxStudents = this.createStudents();
     this.grayboxStudents.label = 'studentsBack.graybox';
@@ -110,6 +114,7 @@ export class ClassroomScene implements Scene {
       const blackboardEndAt = classroom.blackboardAt + classroom.blackboardDuration;
 
       classroomTimeline.addLabel('classroom:start', 0);
+      classroomTimeline.call(() => this.audio?.playLoop('classroomAmbience'), [], 'classroom:start');
       classroomTimeline.set(this.root, { visible: true, alpha: 1 }, 0);
       classroomTimeline.set(doorOpenBg, { visible: true }, 0);
       classroomTimeline.set(doorClosedBg, { visible: false }, 0);
@@ -156,8 +161,20 @@ export class ClassroomScene implements Scene {
 
       classroomTimeline.addLabel('teacher:inside', classroom.entranceDuration);
       classroomTimeline.addLabel('door:close', 'teacher:inside');
+      classroomTimeline.call(() => this.audio?.play('door'), [], 'door:close');
       classroomTimeline.set(doorOpenBg, { visible: false }, 'door:close');
       classroomTimeline.set(doorClosedBg, { visible: true }, 'door:close');
+
+      const ambienceFadeDuration = Math.max(
+        0,
+        classroom.lessonStartAt - classroom.entranceDuration,
+      );
+      if (this.audio) {
+        classroomTimeline.add(
+          this.audio.fade('classroomAmbience', 0, ambienceFadeDuration),
+          'door:close',
+        );
+      }
 
       classroomTimeline.call(() => this.teacher.setPose('putBook'), [], classroom.entranceDuration);
       classroomTimeline.addLabel('teacher:putBook', classroom.entranceDuration);
@@ -168,6 +185,7 @@ export class ClassroomScene implements Scene {
       classroomTimeline.set(this.teacher.visual, { y: 0 }, putBookEndAt);
       classroomTimeline.call(() => this.teacher.setPose('talk1'), [], classroom.lessonStartAt);
       classroomTimeline.addLabel('lesson:start', classroom.lessonStartAt);
+      classroomTimeline.call(() => this.audio?.stop('classroomAmbience'), [], 'lesson:start');
       this.addTalkPoseSwitches(classroomTimeline, classroom.lessonStartAt, classroom.blackboardAt);
       this.addDialogue(classroomTimeline, {
         at: classroom.dialogueLanguageAt,
@@ -196,6 +214,7 @@ export class ClassroomScene implements Scene {
 
       classroomTimeline.addLabel('bell', classroom.bellAt);
       classroomTimeline.call(() => this.triggerBell(), [], classroom.bellAt);
+      classroomTimeline.call(() => this.audio?.play('bell'), [], 'bell');
       classroomTimeline.call(() => this.teacher.setPose('react'), [], classroom.bellAt + 0.02);
       classroomTimeline.to(this.bellIndicator, {
         alpha: 1,
@@ -221,6 +240,7 @@ export class ClassroomScene implements Scene {
       }, classroom.bellAt + 0.1);
 
       classroomTimeline.addLabel('sprint:start', classroom.runStartAt);
+      classroomTimeline.call(() => this.audio?.playLoop('hallwayRun'), [], 'sprint:start');
       this.addSprintPoseSwitches(classroomTimeline, classroom.runStartAt, classroom.windowJumpAt);
       classroomTimeline.to(this.teacher.root, {
         x: classroom.windowRunX,
@@ -237,6 +257,8 @@ export class ClassroomScene implements Scene {
 
       classroomTimeline.call(() => this.teacher.setPose('jump'), [], classroom.windowJumpAt);
       classroomTimeline.addLabel('jump:start', classroom.windowJumpAt);
+      classroomTimeline.call(() => this.audio?.stop('hallwayRun'), [], 'jump:start');
+      classroomTimeline.call(() => this.audio?.play('bigJump'), [], 'jump:start');
       classroomTimeline.add(jumpTo({
         target: this.teacher.root,
         startX: classroom.windowRunX,
@@ -265,6 +287,8 @@ export class ClassroomScene implements Scene {
       classroomTimeline.set(this.teacher.root, { visible: false }, classroom.windowExitAt);
       classroomTimeline.set(this.teacher.visual.scale, { x: 1, y: 1 }, classroom.windowExitAt);
       classroomTimeline.addLabel('classroom:end', classroom.windowExitAt);
+      classroomTimeline.call(() => this.audio?.stop('bell'), [], 'classroom:end');
+      classroomTimeline.call(() => this.audio?.stop('bigJump'), [], 'classroom:end');
     });
 
     if (!timeline) {

@@ -26,6 +26,9 @@ interface PlaybackControllerOptions {
   reset: () => void;
   minSpeed?: number;
   maxSpeed?: number;
+  onPlay?: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
   onReset?: (generation: number) => void;
 }
 
@@ -34,6 +37,9 @@ export class PlaybackController {
   private readonly resetRuntime: () => void;
   private readonly minSpeed: number;
   private readonly maxSpeed: number;
+  private readonly onPlay: (() => void) | undefined;
+  private readonly onPause: (() => void) | undefined;
+  private readonly onResume: (() => void) | undefined;
   private readonly onReset: ((generation: number) => void) | undefined;
   private readonly listeners = new Set<PlaybackListener>();
 
@@ -48,6 +54,9 @@ export class PlaybackController {
     this.resetRuntime = options.reset;
     this.minSpeed = options.minSpeed ?? 0.25;
     this.maxSpeed = options.maxSpeed ?? 2;
+    this.onPlay = options.onPlay;
+    this.onPause = options.onPause;
+    this.onResume = options.onResume;
     this.onReset = options.onReset;
   }
 
@@ -67,6 +76,7 @@ export class PlaybackController {
 
   play(): void {
     if (this.state === 'finished') {
+      this.onPlay?.();
       void this.restart();
       return;
     }
@@ -78,6 +88,7 @@ export class PlaybackController {
     if (this.state === 'playing') return;
     if (!this.masterTimeline) return;
 
+    this.onPlay?.();
     this.masterTimeline.play(0);
     this.setState('playing');
   }
@@ -86,6 +97,7 @@ export class PlaybackController {
     if (this.state !== 'playing' || !this.masterTimeline) return;
 
     this.masterTimeline.pause();
+    this.onPause?.();
     this.setState('paused');
   }
 
@@ -93,6 +105,7 @@ export class PlaybackController {
     if (this.state !== 'paused' || !this.masterTimeline) return;
 
     this.masterTimeline.resume();
+    this.onResume?.();
     this.setState('playing');
   }
 

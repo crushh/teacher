@@ -14,6 +14,7 @@ import {
   type CitySkyState,
 } from '../game/config';
 import { Teacher } from '../entities/Teacher';
+import type { AudioManager } from '../audio/AudioManager';
 import type { Scene, GsapTimeline } from './Scene';
 
 const COLORS = {
@@ -150,6 +151,7 @@ export class CityScene implements Scene {
   readonly root = new Container({ label: 'CityScene.root' });
 
   private readonly teacher: Teacher;
+  private readonly audio: AudioManager | undefined;
   private readonly cityAssets: CityAssets;
   private readonly panRoot: Container;
   private readonly shakeRoot: Container;
@@ -205,8 +207,10 @@ export class CityScene implements Scene {
     shakeRoot: Container,
     sceneHost: Container,
     cityAssets: CityAssets,
+    audio?: AudioManager,
   ) {
     this.teacher = teacher;
+    this.audio = audio;
     this.cityAssets = cityAssets;
     this.panRoot = panRoot;
     this.shakeRoot = shakeRoot;
@@ -299,19 +303,26 @@ export class CityScene implements Scene {
       let actionStart: number = MOVIE_CONFIG.city.initialLandingAt;
       rooftops.forEach((rooftop, index) => {
         const isFinalJump = index === rooftops.length - 1;
+        const runLabel = `roof${rooftop.id}:run`;
+        const jumpLabel = `roof${rooftop.id}:jump`;
         const roofRun = this.createRoofRun({
           fromX: rooftop.landingX,
           toX: rooftop.takeoffX,
           y: this.getTeacherY(rooftop.roofY),
           duration: rooftop.runDuration,
         });
+        sceneTimeline.addLabel(runLabel, actionStart);
         sceneTimeline.add(roofRun, actionStart);
+        sceneTimeline.call(() => this.audio?.playLoop('asphaltRun'), [], runLabel);
 
         const jumpStart = actionStart + rooftop.runDuration;
+        sceneTimeline.addLabel(jumpLabel, jumpStart);
+        sceneTimeline.call(() => this.audio?.stop('asphaltRun'), [], jumpLabel);
         if (isFinalJump) {
-      const finalJump = MOVIE_CONFIG.city.finalJump;
-      const jumpEnd = jumpStart + finalJump.duration;
+          const finalJump = MOVIE_CONFIG.city.finalJump;
+          const jumpEnd = jumpStart + finalJump.duration;
           sceneTimeline.call(() => this.teacher.setPose('jump'), [], jumpStart);
+          sceneTimeline.call(() => this.audio?.play('bigJump'), [], jumpLabel);
           sceneTimeline.add(jumpTo({
             target: this.teacher.root,
             startX: rooftop.takeoffX,
@@ -336,6 +347,7 @@ export class CityScene implements Scene {
 
         const jumpEnd = jumpStart + jumpToNext.duration;
         sceneTimeline.call(() => this.teacher.setPose('jump'), [], jumpStart);
+        sceneTimeline.call(() => this.audio?.play('smallJump'), [], jumpLabel);
         sceneTimeline.add(jumpTo({
           target: this.teacher.root,
           startX: rooftop.takeoffX,

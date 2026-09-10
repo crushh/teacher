@@ -4,6 +4,7 @@ import { gsap } from 'gsap';
 import { loadClassroomAssets, type ClassroomAssets } from '../assets/classroomAssets';
 import { loadCityAssets, type CityAssets } from '../assets/cityAssets';
 import { loadHallwayAssets, type HallwayAssets } from '../assets/hallwayAssets';
+import { AudioManager } from '../audio/AudioManager';
 import { createTuningPanel, type RuntimeResetChecks, type TuningPanel } from '../dev/createTuningPanel';
 import { Teacher } from '../entities/Teacher';
 import { ClassroomScene } from '../scenes/ClassroomScene';
@@ -26,6 +27,7 @@ export class Game {
   private classroomScene: ClassroomScene | undefined;
   private cityScene: CityScene | undefined;
   private hallwayScene: HallwayScene | undefined;
+  private audioManager: AudioManager | undefined;
   private transitionEffects: TransitionEffects | undefined;
   private transitionContext: gsap.Context | undefined;
   private playbackController: PlaybackController | undefined;
@@ -63,6 +65,8 @@ export class Game {
   }
 
   destroy(): void {
+    this.audioManager?.reset();
+    this.audioManager = undefined;
     this.tuningPanel?.destroy();
     this.tuningPanel = undefined;
     this.unsubscribeSkyTimeline?.();
@@ -92,6 +96,8 @@ export class Game {
     cityAssets: CityAssets,
     hallwayAssets: HallwayAssets,
   ): void {
+    const audioManager = new AudioManager();
+    audioManager.preload();
     const teacher = new Teacher({
       x: MOVIE_CONFIG.teacher.startX,
       y: MOVIE_CONFIG.teacher.startY,
@@ -104,9 +110,28 @@ export class Game {
       frames: cityAssets.ninjaRun,
       scale: MOVIE_CONFIG.city.ninjaRunScale,
     });
-    const classroomScene = new ClassroomScene(teacher, this.sceneHost, classroomAssets.environment, this.mount);
-    const cityScene = new CityScene(teacher, this.panRoot, this.shakeRoot, this.sceneHost, cityAssets);
-    const hallwayScene = new HallwayScene(teacher, this.shakeRoot, this.sceneHost, hallwayAssets);
+    const classroomScene = new ClassroomScene(
+      teacher,
+      this.sceneHost,
+      classroomAssets.environment,
+      this.mount,
+      audioManager,
+    );
+    const cityScene = new CityScene(
+      teacher,
+      this.panRoot,
+      this.shakeRoot,
+      this.sceneHost,
+      cityAssets,
+      audioManager,
+    );
+    const hallwayScene = new HallwayScene(
+      teacher,
+      this.shakeRoot,
+      this.sceneHost,
+      hallwayAssets,
+      audioManager,
+    );
     classroomScene.build();
     cityScene.build();
     hallwayScene.build();
@@ -116,6 +141,7 @@ export class Game {
     this.classroomScene = classroomScene;
     this.cityScene = cityScene;
     this.hallwayScene = hallwayScene;
+    this.audioManager = audioManager;
     this.transitionEffects = createTransitionEffects(this.sceneHost);
 
     this.playbackController = new PlaybackController({
@@ -123,6 +149,9 @@ export class Game {
       reset: () => this.resetMovieState(),
       minSpeed: MOVIE_CONFIG.speed.min,
       maxSpeed: MOVIE_CONFIG.speed.max,
+      onPlay: () => this.audioManager?.unlock(),
+      onPause: () => this.audioManager?.pause(),
+      onResume: () => this.audioManager?.resume(),
     });
     this.playbackController.initialize();
     this.unsubscribeSkyTimeline = this.playbackController.subscribe((snapshot) => {
@@ -196,6 +225,7 @@ export class Game {
   }
 
   private resetMovieState(): void {
+    this.audioManager?.reset();
     this.resetContainer(this.panRoot, 0, 0);
     this.resetContainer(this.shakeRoot, 0, 0);
     this.resetContainer(this.sceneHost, 0, 0);
@@ -207,6 +237,7 @@ export class Game {
   }
 
   private resetMovieStateForLoopBoundary(): void {
+    this.audioManager?.stopAll();
     this.resetContainer(this.panRoot, 0, 0);
     this.resetContainer(this.shakeRoot, 0, 0);
     this.resetContainer(this.sceneHost, 0, 0);

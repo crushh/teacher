@@ -7,6 +7,7 @@ import { Book } from '../entities/Book';
 import type { HallwayAssets } from '../assets/hallwayAssets';
 import { GAME_HEIGHT, GAME_WIDTH, MOVIE_CONFIG } from '../game/config';
 import { Teacher } from '../entities/Teacher';
+import type { AudioManager } from '../audio/AudioManager';
 import type { Scene, GsapTimeline } from './Scene';
 
 const COLORS = {
@@ -20,6 +21,7 @@ export class HallwayScene implements Scene {
   readonly book = new Book(318, 224);
 
   private readonly teacher: Teacher;
+  private readonly audio: AudioManager | undefined;
   private readonly shakeRoot: Container;
   private readonly hallwayAssets: HallwayAssets;
   private readonly hallwayBg: Sprite;
@@ -34,10 +36,17 @@ export class HallwayScene implements Scene {
   private context: gsap.Context | undefined;
   private built = false;
 
-  constructor(teacher: Teacher, shakeRoot: Container, sceneHost: Container, hallwayAssets: HallwayAssets) {
+  constructor(
+    teacher: Teacher,
+    shakeRoot: Container,
+    sceneHost: Container,
+    hallwayAssets: HallwayAssets,
+    audio?: AudioManager,
+  ) {
     this.teacher = teacher;
     this.shakeRoot = shakeRoot;
     this.hallwayAssets = hallwayAssets;
+    this.audio = audio;
     this.hallwayBg = new Sprite(hallwayAssets.hallwayBgDoorClose);
     this.hallwayBg.label = 'hallwayBackground';
     this.hallwayBg.position.set(0, 0);
@@ -86,6 +95,7 @@ export class HallwayScene implements Scene {
       const rollEndAppearAt = rollEndAt + hallway.residualDustDuration;
       const bookDropAt = rollEndAppearAt + hallway.rollEndPauseDuration;
       const walkOutAt = hallway.bookCatchAt + hallway.bookCatchSettleDuration;
+      const walkEndAt = walkOutAt + hallway.walkOutDuration;
 
       timeline.addLabel('hallway:start', 0);
       timeline.addLabel('fall:start', 0);
@@ -96,6 +106,7 @@ export class HallwayScene implements Scene {
       timeline.addLabel('book:drop', bookDropAt);
       timeline.addLabel('book:catch', hallway.bookCatchAt);
       timeline.addLabel('walk:out', walkOutAt);
+      timeline.addLabel('walk:end', walkEndAt);
       timeline.addLabel('hallway:end', hallway.endingCardAt + hallway.endingCardDuration);
 
       timeline.set(this.root, { visible: true, alpha: 1 }, 'hallway:start');
@@ -125,6 +136,7 @@ export class HallwayScene implements Scene {
       }, 'hallway:start');
       timeline.set(this.rollVisual, { x: 0, y: hallway.rollVisualY, rotation: 0 }, 'hallway:start');
       timeline.set(this.rollVisual.scale, { x: hallway.rollScale, y: hallway.rollScale }, 'hallway:start');
+      timeline.call(() => this.audio?.stop('roll'), [], 'roll:end');
       timeline.set(this.dust, {
         x: hallway.rollEndX,
         y: hallway.groundY,
@@ -142,6 +154,7 @@ export class HallwayScene implements Scene {
         ease: 'power2.in',
       }, 'fall:start');
       timeline.set(this.impact, { visible: true, alpha: 1 }, 'hallway:landing');
+      timeline.call(() => this.audio?.play('landing'), [], 'hallway:landing');
       timeline.add(squash(this.teacher.visual, 0.12, hallway.landingImpactDuration), 'hallway:landing');
       timeline.add(cameraShake(this.shakeRoot, {
         strength: hallway.landingShakeStrength,
@@ -153,6 +166,7 @@ export class HallwayScene implements Scene {
         ease: 'none',
       }, 'hallway:landing');
       timeline.call(() => this.startRollEffect(), [], 'roll:start');
+      timeline.call(() => this.audio?.play('roll'), [], 'roll:start');
       timeline.to(this.rollRoot, {
         x: hallway.rollEndX,
         duration: hallway.rollDuration,
@@ -217,6 +231,7 @@ export class HallwayScene implements Scene {
       }, 'roll:end');
       timeline.set(this.dust, { visible: false, alpha: 1 }, 'rollEnd:show');
       timeline.call(() => this.finishRoll(), [], 'rollEnd:show');
+      timeline.call(() => this.audio?.play('falling'), [], 'rollEnd:show');
 
       timeline.set(this.book.root, {
         x: 318,
@@ -233,6 +248,7 @@ export class HallwayScene implements Scene {
         ease: 'power2.in',
       }, 'book:drop');
       timeline.call(() => this.teacher.setPose('walkBook', hallway.teacherScale), [], 'book:catch');
+      timeline.call(() => this.audio?.play('catch'), [], 'book:catch');
       timeline.to(this.book.root, {
         x: 320,
         y: 224,
@@ -251,6 +267,8 @@ export class HallwayScene implements Scene {
         duration: hallway.walkOutDuration,
         ease: 'power2.in',
       }, walkOutAt);
+      timeline.call(() => this.audio?.playLoop('hallwayRun'), [], 'walk:out');
+      timeline.call(() => this.audio?.stop('hallwayRun'), [], 'walk:end');
       timeline.set(this.hallwayBg, { texture: this.hallwayAssets.hallwayBgDoorOpen }, 'walk:out');
       timeline.to(this.endingCard, {
         alpha: 1,
