@@ -13,11 +13,15 @@ import roofBRightUrl from './city/roof_b_right.png';
 import roofCLeftUrl from './city/roof_c_left.png';
 import roofCMiddleUrl from './city/roof_c_middle.png';
 import roofCRightUrl from './city/roof_c_right.png';
+import ninja01Url from './city/ninja_01.png';
+import ninja02Url from './city/ninja_02.png';
+import ninja03Url from './city/ninja_03.png';
+import ninja04Url from './city/ninja_04.png';
 import rooftopUtilityBox1Url from './city/small_rooftop_utility_box_1.png';
 import rooftopUtilityBox2Url from './city/small_rooftop_utility_box_2.png';
 import waterTank1Url from './city/water_tank_1.png';
 import waterTank2Url from './city/water_tank_2.png';
-import { configurePixelTexture } from '../game/pixel';
+import { configurePixelTexture, removeCheckerboard } from '../game/pixel';
 
 export interface CityAssets {
   readonly far: Texture;
@@ -37,10 +41,15 @@ export interface CityAssets {
   readonly roofCLeft: Texture;
   readonly roofCMiddle: Texture;
   readonly roofCRight: Texture;
+  readonly ninjaRun: readonly [Texture, Texture, Texture, Texture];
 }
 
 async function loadCityTexture(url: string): Promise<Texture> {
   return configurePixelTexture(await Assets.load<Texture>(url));
+}
+
+async function loadCityCutoutTexture(url: string): Promise<Texture> {
+  return removeCheckerboard(await loadCityTexture(url));
 }
 
 export async function loadCityAssets(): Promise<CityAssets> {
@@ -62,6 +71,10 @@ export async function loadCityAssets(): Promise<CityAssets> {
     roofCLeft,
     roofCMiddle,
     roofCRight,
+    ninja01,
+    ninja02,
+    ninja03,
+    ninja04,
   ] = await Promise.all([
     loadCityTexture(farCityUrl),
     loadCityTexture(midCityUrl),
@@ -80,6 +93,10 @@ export async function loadCityAssets(): Promise<CityAssets> {
     loadCityTexture(roofCLeftUrl),
     loadCityTexture(roofCMiddleUrl),
     loadCityTexture(roofCRightUrl),
+    loadCityCutoutTexture(ninja01Url),
+    loadCityCutoutTexture(ninja02Url),
+    loadCityCutoutTexture(ninja03Url),
+    loadCityCutoutTexture(ninja04Url),
   ]);
 
   return {
@@ -100,5 +117,6 @@ export async function loadCityAssets(): Promise<CityAssets> {
     roofCLeft,
     roofCMiddle,
     roofCRight,
+    ninjaRun: [ninja01, ninja02, ninja03, ninja04],
   };
 }

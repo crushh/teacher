@@ -25,19 +25,23 @@ const COLORS = {
   dust: 0xd5c1a2,
 } as const;
 
-type ResolvedRooftop = {
-  readonly id: string;
+type CityRooftopConfig = (typeof MOVIE_CONFIG.city.rooftops)[number];
+type CityRooftopJump = {
   readonly height: number;
-  readonly landingX: number;
+  readonly duration: number;
+};
+
+type ResolvedRooftop = Omit<CityRooftopConfig, 'roofY' | 'facadeScale' | 'jumpToNext'> & {
   roofY: number;
-  readonly runDuration: number;
-  readonly jumpToNext?: {
-    readonly height: number;
-    readonly duration: number;
-  };
-  x: number;
+  readonly leftEdgeX: number;
+  readonly rightEdgeX: number;
   width: number;
+  readonly landingX: number;
   takeoffX: number;
+  readonly runDistance: number;
+  readonly runDuration: number;
+  readonly facadeScale: number;
+  readonly jumpToNext?: CityRooftopJump;
 };
 
 /*
@@ -264,6 +268,8 @@ export class CityScene implements Scene {
 
       sceneTimeline.set(this.root, { visible: true, alpha: 1 }, 0);
       sceneTimeline.set(this.panRoot, { x: 0, y: 0 }, 0);
+      sceneTimeline.set(this.skyContainer, { x: 0 }, 0);
+      sceneTimeline.set([this.farLayer, this.midLayer, this.frontLayer], { x: 0 }, 0);
       sceneTimeline.set(this.speedLines, { visible: true, alpha: 0 }, 0);
       const rooftops = this.resolveRooftops();
       const firstRoof = rooftops[0];
@@ -273,7 +279,7 @@ export class CityScene implements Scene {
 
       sceneTimeline.set(this.teacher.root, {
         x: firstRoof.landingX,
-        y: firstRoof.roofY - 36,
+        y: this.getTeacherY(firstRoof.roofY - 36),
         visible: true,
         alpha: 1,
       }, 0);
@@ -282,7 +288,11 @@ export class CityScene implements Scene {
         y: MOVIE_CONFIG.city.teacherScale,
       }, 0);
       sceneTimeline.call(() => this.teacher.setPose('fall'), [], 0);
-      sceneTimeline.to(this.teacher.root, { y: firstRoof.roofY, duration: MOVIE_CONFIG.city.initialLandingAt, ease: 'bounce.out' }, 0);
+      sceneTimeline.to(this.teacher.root, {
+        y: this.getTeacherY(firstRoof.roofY),
+        duration: MOVIE_CONFIG.city.initialLandingAt,
+        ease: 'bounce.out',
+      }, 0);
       sceneTimeline.call(() => this.teacher.setPose('idle'), [], MOVIE_CONFIG.city.initialLandingAt);
       this.addLandingFeedback(sceneTimeline, MOVIE_CONFIG.city.initialLandingAt, firstRoof.landingX, firstRoof.roofY, 0);
 
@@ -292,22 +302,22 @@ export class CityScene implements Scene {
         const roofRun = this.createRoofRun({
           fromX: rooftop.landingX,
           toX: rooftop.takeoffX,
-          y: rooftop.roofY,
+          y: this.getTeacherY(rooftop.roofY),
           duration: rooftop.runDuration,
         });
         sceneTimeline.add(roofRun, actionStart);
 
         const jumpStart = actionStart + rooftop.runDuration;
         if (isFinalJump) {
-          const finalJump = MOVIE_CONFIG.city.finalJump;
-          const jumpEnd = jumpStart + finalJump.duration;
+      const finalJump = MOVIE_CONFIG.city.finalJump;
+      const jumpEnd = jumpStart + finalJump.duration;
           sceneTimeline.call(() => this.teacher.setPose('jump'), [], jumpStart);
           sceneTimeline.add(jumpTo({
             target: this.teacher.root,
             startX: rooftop.takeoffX,
-            startY: rooftop.roofY,
-            targetX: finalJump.targetX,
-            targetY: finalJump.targetY,
+            startY: this.getTeacherY(rooftop.roofY),
+            targetX: rooftop.rightEdgeX + finalJump.exitPadding,
+            targetY: this.getTeacherY(finalJump.targetY),
             height: finalJump.height,
             duration: finalJump.duration,
           }), jumpStart);
@@ -329,9 +339,9 @@ export class CityScene implements Scene {
         sceneTimeline.add(jumpTo({
           target: this.teacher.root,
           startX: rooftop.takeoffX,
-          startY: rooftop.roofY,
+          startY: this.getTeacherY(rooftop.roofY),
           targetX: nextRoof.landingX,
-          targetY: nextRoof.roofY,
+          targetY: this.getTeacherY(nextRoof.roofY),
           height: jumpToNext.height,
           duration: jumpToNext.duration,
         }), jumpStart);
@@ -364,17 +374,30 @@ export class CityScene implements Scene {
           speed: MOVIE_CONFIG.city.parallax.front.speed,
         },
       ], cityDuration), 0);
-      const finalJumpStart = cityDuration - MOVIE_CONFIG.city.finalJump.duration;
-      sceneTimeline.to(this.panRoot, {
-        x: -18,
-        duration: 0.7,
-        ease: 'power1.inOut',
-      }, finalJumpStart);
+
+      // Keep the teacher in the logical viewport while the expanded rooftops
+      // carry the gameplay farther to the right. The camera moves by shifting
+      // the shared world root left; Teacher.root.x itself remains gameplay data.
+      const cameraFollow = { progress: 0 };
+      const cameraFollowDuration = Math.max(
+        0,
+        cityDuration - MOVIE_CONFIG.city.cameraResetDuration,
+      );
+      sceneTimeline.to(cameraFollow, {
+        progress: 1,
+        duration: cameraFollowDuration,
+        ease: 'none',
+        onUpdate: () => this.updateCameraFollow(),
+      }, 0);
       sceneTimeline.to(this.panRoot, {
         x: 0,
-        duration: 0.35,
+        duration: MOVIE_CONFIG.city.cameraResetDuration,
         ease: 'power1.out',
-      }, cityDuration - 0.45);
+        onUpdate: () => this.updateSkyCameraCompensation(),
+        onComplete: () => {
+          this.skyContainer.x = 0;
+        },
+      }, cameraFollowDuration);
     });
 
     if (!timeline) {
@@ -469,19 +492,77 @@ export class CityScene implements Scene {
   }
 
   private resolveRooftops(): ResolvedRooftop[] {
-    const padding = MOVIE_CONFIG.city.roofPadding;
+    let leftEdgeX = MOVIE_CONFIG.city.rooftopStartX;
 
     return MOVIE_CONFIG.city.rooftops.map((rooftop) => {
-      const runDistance = MOVIE_CONFIG.city.runSpeed * rooftop.runDuration;
+      const facadeSpec = ROOFTOP_FACADES[rooftop.id];
+      if (!facadeSpec) {
+        throw new Error(`Missing facade PNG configuration for rooftop ${rooftop.id}.`);
+      }
 
-      return {
+      const sourceWidth = this.getFacadeSourceWidth(rooftop.id, rooftop.middleCount);
+      const width = Math.max(1, Math.round(sourceWidth * rooftop.facadeScale));
+      const facadeScale = width / sourceWidth;
+      const rightEdgeX = leftEdgeX + width;
+      const landingX = Math.round(leftEdgeX + rooftop.landingPadding);
+      const takeoffX = Math.round(rightEdgeX - rooftop.takeoffPadding);
+      const runDistance = takeoffX - landingX;
+
+      if (runDistance <= 0) {
+        throw new Error(`Rooftop ${rooftop.id} has no usable running space.`);
+      }
+
+      const resolved: ResolvedRooftop = {
         ...rooftop,
         roofY: rooftop.roofY + MOVIE_CONFIG.city.platformYOffset,
-        x: rooftop.landingX - padding,
-        width: runDistance + padding * 2,
-        takeoffX: rooftop.landingX + runDistance,
+        leftEdgeX,
+        rightEdgeX,
+        width,
+        landingX,
+        takeoffX,
+        runDistance,
+        runDuration: runDistance / MOVIE_CONFIG.city.teacherRunSpeed,
+        facadeScale,
       };
+      leftEdgeX = rightEdgeX + MOVIE_CONFIG.city.rooftopGap;
+      return resolved;
     });
+  }
+
+  private getFacadeSourceWidth(roofId: string, middleCount: number): number {
+    const facadeSpec = ROOFTOP_FACADES[roofId];
+    if (!facadeSpec) {
+      throw new Error(`Missing facade PNG configuration for rooftop ${roofId}.`);
+    }
+
+    return (
+      facadeSpec.left.frame.width
+      + facadeSpec.middle.frame.width * middleCount
+      + facadeSpec.right.frame.width
+    );
+  }
+
+  private getTeacherY(roofY: number): number {
+    return roofY + MOVIE_CONFIG.city.teacherYOffset;
+  }
+
+  private updateCameraFollow(): void {
+    const desiredPanX = MOVIE_CONFIG.city.cameraFollowX - this.teacher.root.x;
+    this.panRoot.x = Math.min(0, Math.round(desiredPanX));
+    this.updateSkyCameraCompensation();
+  }
+
+  private updateSkyCameraCompensation(): void {
+    // CityScene is inside panRoot, but the sky and parallax layers are
+    // viewport scenery. Keep them in screen space while the rooftop gameplay
+    // world follows Teacher. Without this compensation, the camera pan is
+    // added to the parallax offset and can move both repeated segments out of
+    // the viewport before the next modulo wrap.
+    const cameraCompensation = -this.panRoot.x;
+    this.skyContainer.x = cameraCompensation;
+    this.farLayer.x = cameraCompensation;
+    this.midLayer.x = cameraCompensation;
+    this.frontLayer.x = cameraCompensation;
   }
 
   private getCityDuration(rooftops: readonly ResolvedRooftop[]): number {
@@ -538,13 +619,13 @@ export class CityScene implements Scene {
   }
 
   private addRunPoseSwitches(timeline: GsapTimeline, startAt: number, endAt: number): void {
-    timeline.call(() => this.teacher.setPose('run1'), [], startAt);
+    timeline.call(() => this.teacher.setRunCycleFrame(0), [], startAt);
     let frame = 1;
     const frameDuration = MOVIE_CONFIG.city.runFrameDuration;
 
     for (let at = startAt + frameDuration; at < endAt; at += frameDuration) {
-      const pose = frame % 2 === 1 ? 'run2' : 'run1';
-      timeline.call(() => this.teacher.setPose(pose), [], at);
+      const cycleFrame = frame % 4;
+      timeline.call(() => this.teacher.setRunCycleFrame(cycleFrame), [], at);
       frame += 1;
     }
   }
@@ -782,14 +863,15 @@ export class CityScene implements Scene {
   }
 
   private createPlatforms(): void {
-    this.resolveRooftops().forEach(({ x, roofY: top, width, height, id }) => {
+    this.resolveRooftops().forEach(({ leftEdgeX, roofY: top, width, height, id, middleCount, facadeScale }) => {
       const building = new Container({ label: `building${id}` });
-      building.addChild(this.createRooftopFacade(id, x, top, width));
+      building.position.set(leftEdgeX, 0);
+      building.addChild(this.createRooftopFacade(id, 0, top, middleCount, facadeScale));
       for (let row = 0; row < Math.floor(height / 30); row += 1) {
         const windowLight = new Graphics()
-          .rect(x + 12, top + 16 + row * 30, 8, 10)
+          .rect(12, top + 16 + row * 30, 8, 10)
           .fill({ color: COLORS.windowCool, alpha: 0.45 })
-          .rect(x + width - 22, top + 16 + row * 30, 8, 10)
+          .rect(width - 22, top + 16 + row * 30, 8, 10)
           .fill({ color: COLORS.window, alpha: 0.45 });
         this.windowLights.push(windowLight);
         building.addChild(windowLight);
@@ -805,7 +887,7 @@ export class CityScene implements Scene {
           fontWeight: '700',
         },
       });
-      labelText.position.set(x + 8, top - 22);
+      labelText.position.set(8, top - 22);
       building.addChild(labelText);
       this.platforms.addChild(building);
     });
@@ -815,7 +897,8 @@ export class CityScene implements Scene {
     roofId: string,
     x: number,
     top: number,
-    width: number,
+    middleCount: number,
+    facadeScale: number,
   ): Container {
     const facadeSpec = ROOFTOP_FACADES[roofId];
     if (!facadeSpec) {
@@ -828,19 +911,18 @@ export class CityScene implements Scene {
     const leftBodyTexture = this.createFacadeTexture(facadeSpec.left, 'body');
     const middleBodyTexture = this.createFacadeTexture(facadeSpec.middle, 'body');
     const rightBodyTexture = this.createFacadeTexture(facadeSpec.right, 'body');
-    const facadeSourceWidth = leftTopTexture.width + middleTopTexture.width + rightTopTexture.width;
-    const facadeScale = width / facadeSourceWidth;
     const facadeContainer = new Container({ label: `building${roofId}.facadeContainer` });
 
     const middleX = leftTopTexture.width;
-    const rightX = middleX + middleTopTexture.width;
+    const middleWidth = middleTopTexture.width * middleCount;
+    const rightX = middleX + middleWidth;
     const requiredSourceHeight = Math.ceil(Math.max(0, (GAME_HEIGHT - top) / facadeScale));
 
     // The top row is rendered once. Only the body below each cap is tiled.
     const leftTop = new Sprite(leftTopTexture);
     const middleTop = new TilingSprite({
       texture: middleTopTexture,
-      width: middleTopTexture.width,
+      width: middleWidth,
       height: middleTopTexture.height,
     });
     const rightTop = new Sprite(rightTopTexture);
@@ -854,7 +936,7 @@ export class CityScene implements Scene {
     });
     const middleBody = new TilingSprite({
       texture: middleBodyTexture,
-      width: middleBodyTexture.width,
+      width: middleBodyTexture.width * middleCount,
       height: Math.max(1, requiredSourceHeight - facadeSpec.middle.bodyStart),
     });
     const rightBody = new TilingSprite({

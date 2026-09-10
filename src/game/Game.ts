@@ -100,6 +100,9 @@ export class Game {
       rollEnd: hallwayAssets.teacherRollEnd,
     }, {
       rollEnd: MOVIE_CONFIG.hallway.rollEndScale,
+    }, {
+      frames: cityAssets.ninjaRun,
+      scale: MOVIE_CONFIG.city.ninjaRunScale,
     });
     const classroomScene = new ClassroomScene(teacher, this.sceneHost, classroomAssets.environment, this.mount);
     const cityScene = new CityScene(teacher, this.panRoot, this.shakeRoot, this.sceneHost, cityAssets);

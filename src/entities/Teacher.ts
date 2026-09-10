@@ -1,4 +1,4 @@
-import { Container, Graphics, Sprite } from 'pixi.js';
+import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 
 import type { ClassroomPoseTextures } from '../assets/classroomAssets';
 import { RUNTIME_CONFIG } from '../game/config';
@@ -6,6 +6,11 @@ import { RUNTIME_CONFIG } from '../game/config';
 export interface TeacherResetStatus {
   root: boolean;
   visual: boolean;
+}
+
+export interface TeacherRunCycle {
+  readonly frames: readonly Texture[];
+  readonly scale: number;
 }
 
 export type TeacherPose =
@@ -53,6 +58,7 @@ export class Teacher {
   private readonly poseSprite: Sprite | undefined;
   private readonly poseTextures: ClassroomPoseTextures | undefined;
   private readonly poseScales: Partial<Record<TeacherPose, number>>;
+  private readonly runCycle: TeacherRunCycle;
   private readonly initialRootPosition: Position;
   private readonly initialVisualPosition: Position = { x: 0, y: 0 };
   private pose: TeacherPose = 'idle';
@@ -64,10 +70,12 @@ export class Teacher {
     },
     poseTextures?: ClassroomPoseTextures,
     poseScales: Partial<Record<TeacherPose, number>> = {},
+    runCycle: TeacherRunCycle = { frames: [], scale: 0.68 },
   ) {
     this.initialRootPosition = { ...initialPosition };
     this.poseTextures = poseTextures;
     this.poseScales = poseScales;
+    this.runCycle = runCycle;
     this.placeholder = this.createPlaceholder();
     this.root.addChild(this.visual);
     if (poseTextures) {
@@ -100,12 +108,12 @@ export class Teacher {
     }
   }
 
-  setPose(pose: TeacherPose): void {
+  setPose(pose: TeacherPose, scaleOverride?: number): void {
     this.pose = pose;
     const texture = this.poseTextures?.[poseTextureKey(pose)];
     if (this.poseSprite && texture) {
       this.poseSprite.texture = texture;
-      this.poseSprite.scale.set(this.getPoseScale(pose));
+      this.poseSprite.scale.set(scaleOverride ?? this.getPoseScale(pose));
       this.poseSprite.visible = true;
       this.placeholder.visible = false;
       return;
@@ -113,6 +121,23 @@ export class Teacher {
 
     this.placeholder.visible = true;
     this.placeholder.tint = poseTint(pose);
+  }
+
+  setRunCycleFrame(frame: number): void {
+    if (this.runCycle.frames.length === 0) {
+      this.setPose('run');
+      return;
+    }
+
+    const frameIndex = ((frame % this.runCycle.frames.length) + this.runCycle.frames.length) % this.runCycle.frames.length;
+    const texture = this.runCycle.frames[frameIndex];
+    if (!this.poseSprite || !texture) return;
+
+    this.pose = 'run';
+    this.poseSprite.texture = texture;
+    this.poseSprite.scale.set(this.runCycle.scale);
+    this.poseSprite.visible = true;
+    this.placeholder.visible = false;
   }
 
   getPose(): TeacherPose {
