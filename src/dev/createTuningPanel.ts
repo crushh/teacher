@@ -25,26 +25,8 @@ export function createTuningPanel(
   _getCatPreviewTime: () => number,
 ): TuningPanel {
   if (!UI_CONFIG.showPlaybackControls) {
-    const canvas = parent.querySelector('canvas');
-    const events = new AbortController();
-    const togglePlayback = (): void => {
-      if (controller.getSnapshot().state === 'playing') controller.pause();
-      else controller.play();
-    };
-    const previousTabIndex = canvas?.getAttribute('tabindex') ?? null;
-    if (canvas) canvas.tabIndex = 0;
-    canvas?.addEventListener('click', togglePlayback, { signal: events.signal });
-    canvas?.addEventListener('keydown', (event) => {
-      if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
-        event.preventDefault();
-        togglePlayback();
-      }
-    }, { signal: events.signal });
-    return { destroy(): void {
-      events.abort();
-      if (previousTabIndex === null) canvas?.removeAttribute('tabindex');
-      else canvas?.setAttribute('tabindex', previousTabIndex);
-    } };
+    controller.play();
+    return { destroy(): void {} };
   }
 
   const panel = document.createElement('aside');

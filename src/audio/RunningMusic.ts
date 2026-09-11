@@ -9,6 +9,7 @@ export class RunningMusic {
   private previousTime = -1;
   private speed = 1;
   private muted = false;
+  private needsActivation = true;
   private readonly button = document.createElement('button');
 
   private readonly mount: HTMLElement;
@@ -23,20 +24,36 @@ export class RunningMusic {
     this.updateButton();
     this.button.addEventListener('click', this.toggle);
     mount.appendChild(this.button);
-    mount.addEventListener('click', this.unlock, true);
+    mount.addEventListener('click', this.unlockFromScene, true);
+    this.unlock();
   }
+
+  private readonly unlockFromScene = (event: MouseEvent): void => {
+    if (!this.button.contains(event.target as Node)) this.unlock();
+  };
 
   private readonly unlock = (): void => {
     if (!this.context) {
       this.context = new AudioContext();
+      this.context.onstatechange = () => {
+        this.needsActivation = this.context?.state !== 'running';
+        this.updateButton();
+      };
       this.buffer = createRunningLoop(this.context);
       this.gain = this.context.createGain();
       this.gain.connect(this.context.destination);
     }
     if (this.context.state === 'suspended') void this.context.resume().catch(() => undefined);
+    this.needsActivation = this.context.state !== 'running';
+    this.updateButton();
   };
 
   private readonly toggle = (): void => {
+    if (this.needsActivation && !this.muted) {
+      this.unlock();
+      return;
+    }
+    this.unlock();
     this.muted = !this.muted;
     this.onMuteChange(this.muted);
     this.updateButton();
@@ -45,6 +62,7 @@ export class RunningMusic {
 
   private updateButton(): void {
     this.button.textContent = this.muted ? '♪ Sound: OFF' : '♪ Sound: ON';
+    this.button.title = !this.muted && this.needsActivation ? 'Sound is enabled. Click to allow browser audio.' : 'Toggle all audio';
     this.button.setAttribute('aria-label', 'All audio');
     this.button.setAttribute('aria-pressed', String(!this.muted));
   }
@@ -80,9 +98,10 @@ export class RunningMusic {
 
   destroy(): void {
     this.stop();
-    this.mount.removeEventListener('click', this.unlock, true);
+    this.mount.removeEventListener('click', this.unlockFromScene, true);
     this.button.removeEventListener('click', this.toggle);
     this.button.remove();
+    if (this.context) this.context.onstatechange = null;
     void this.context?.close();
   }
 }

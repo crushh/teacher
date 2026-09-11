@@ -3,7 +3,7 @@ export const GAME_HEIGHT = 360;
 export const LOGICAL_ASPECT_RATIO = GAME_WIDTH / GAME_HEIGHT;
 
 export const UI_CONFIG = {
-  // When false, click the scene to play/pause instead of using the controls.
+  // When false, playback starts automatically and the scene is non-interactive.
   showPlaybackControls: false,
 } as const;
 
