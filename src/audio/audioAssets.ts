@@ -15,6 +15,7 @@ function resolveAudioUrl(filename: string): string {
 }
 
 export const AUDIO_ASSETS = {
+  coin: resolveAudioUrl('coin-pickup.wav'),
   catMeow: resolveAudioUrl('cat-meow.wav'),
   classroomAmbience: resolveAudioUrl('騒がしい高校の教室.mp3'),
   door: resolveAudioUrl('ロッカーを開ける2.mp3'),

@@ -170,6 +170,7 @@ export class CityScene implements Scene {
   readonly id = 'city';
   readonly root = new Container({ label: 'CityScene.root' });
 
+  private readonly pickups = new Container({ label: 'rooftopCoinEncounter' });
   private readonly teacher: Teacher;
   private readonly audio: AudioManager | undefined;
   private readonly cat: RooftopCat;
@@ -296,7 +297,7 @@ export class CityScene implements Scene {
     this.applySkyVisuals();
     this.createEffects();
     this.root.addChild(this.cat.root);
-    this.root.addChild(this.effects);
+    this.root.addChild(this.effects, this.pickups);
     this.root.addChild(this.createLabel());
     this.built = true;
     this.reset();
@@ -306,6 +307,7 @@ export class CityScene implements Scene {
     if (!this.built) this.build();
 
     this.context?.revert();
+    this.pickups.removeChildren().forEach((child) => child.destroy({ children: true }));
 
     let timeline: GsapTimeline | undefined;
     this.context = gsap.context(() => {
@@ -351,12 +353,13 @@ export class CityScene implements Scene {
         const isFinalJump = index === rooftops.length - 1;
         const runLabel = `roof${rooftop.id}:run`;
         const jumpLabel = `roof${rooftop.id}:jump`;
-        const roofRun = this.createRoofRun({
+        const roofRun = rooftop.id === 'B' ? this.createCoinEncounter(rooftop) : this.createRoofRun({
           fromX: rooftop.landingX,
           toX: rooftop.takeoffX,
           y: this.getTeacherY(rooftop.roofY),
           duration: rooftop.runDuration,
         });
+        if (rooftop.id === 'C') this.addFinalCoinTrail(roofRun, rooftop);
         sceneTimeline.addLabel(runLabel, actionStart);
         sceneTimeline.add(roofRun, actionStart);
         sceneTimeline.call(() => this.audio?.playLoop('asphaltRun'), [], runLabel);
@@ -507,6 +510,7 @@ export class CityScene implements Scene {
     this.creditsBillboard?.destroy({ children: true });
     this.creditsBillboard = undefined;
     this.context = undefined;
+    this.pickups.removeChildren().forEach((child) => child.destroy({ children: true }));
     this.root.removeChildren();
     this.clearImageSegments(this.farLayer, this.farSegments);
     this.clearImageSegments(this.midLayer, this.midSegments);
@@ -678,6 +682,80 @@ export class CityScene implements Scene {
     });
 
     return duration;
+  }
+
+  /** Keep the traversal duration unchanged so sky, camera and scene cuts stay aligned. */
+  private createCoinEncounter(roof: ResolvedRooftop): GsapTimeline {
+    const timeline = gsap.timeline();
+    const y = this.getTeacherY(roof.roofY);
+    const center = roof.landingX + roof.runDistance * 0.5;
+    const distance = Math.min(180, roof.runDistance * 0.42);
+    const startX = center - distance / 2;
+    const endX = center + distance / 2;
+    const speed = MOVIE_CONFIG.city.teacherRunSpeed;
+    const start = (startX - roof.landingX) / speed;
+    const duration = distance / speed;
+    const height = 76;
+    const obstacle = new Graphics({ label: 'lowVentObstacle' })
+      .rect(-23, -28, 46, 28).fill(0x243447)
+      .rect(-27, -32, 54, 7).fill(0x91a8b9)
+      .rect(-19, -23, 38, 5).fill(0x52677b)
+      .rect(-19, -14, 38, 5).fill(0x52677b)
+      .rect(-23, -5, 46, 5).fill(0xffc857);
+    obstacle.position.set(center, roof.roofY);
+    this.pickups.addChild(obstacle);
+    timeline.add(this.createRoofRun({ fromX: roof.landingX, toX: startX, y, duration: start }), 0);
+    timeline.call(() => { this.audio?.stop('asphaltRun'); this.audio?.play('smallJump'); this.teacher.setPose('jump'); }, [], start);
+    timeline.add(jumpTo({ target: this.teacher.root, startX, startY: y, targetX: endX, targetY: y, height, duration }), start);
+    timeline.call(() => { this.audio?.play('landing'); this.audio?.playLoop('asphaltRun'); }, [], start + duration);
+    timeline.add(this.createRoofRun({ fromX: endX, toX: roof.takeoffX, y, duration: roof.runDuration - start - duration }), start + duration);
+
+    for (let index = 0; index < 5; index += 1) {
+      const progress = 0.15 + index * 0.175;
+      const at = start + duration * progress;
+      this.addCoinPickup(timeline, `B-${index + 1}`, startX + distance * progress,
+        y - 4 * height * progress * (1 - progress) - 34, at, (index + 1) * 100);
+    }
+    return timeline;
+  }
+
+  private addFinalCoinTrail(timeline: GsapTimeline, roof: ResolvedRooftop): void {
+    // Spread rewards across the quiet stretch, with a tighter rhythm near the exit.
+    const positions = [0.13, 0.28, 0.43, 0.58, 0.71, 0.82, 0.92];
+    positions.forEach((progress, index) => {
+      this.addCoinPickup(timeline, `C-${index + 1}`,
+        roof.landingX + roof.runDistance * progress,
+        this.getTeacherY(roof.roofY) - 48,
+        roof.runDuration * progress, index === positions.length - 1 ? 1000 : 100);
+    });
+  }
+
+  private addCoinPickup(timeline: GsapTimeline, id: string, x: number, y: number, at: number, points: number): void {
+    const coin = new Graphics({ label: `coin-${id}` })
+      .rect(-6, -10, 12, 20).fill(0xa96316)
+      .rect(-8, -7, 16, 14).fill(0xffc632)
+      .rect(-5, -8, 9, 16).fill(0xffe779)
+      .rect(-2, -5, 3, 10).fill(0xc58322)
+      .rect(-4, -7, 2, 5).fill(0xfff8d1);
+    coin.position.set(x, y);
+    const sparkle = new Graphics({ label: `coin-sparkle-${id}` })
+      .rect(-2, -15, 4, 30).fill(0xfff8d1)
+      .rect(-15, -2, 30, 4).fill(0xffdc63);
+    sparkle.position.copyFrom(coin.position);
+    sparkle.alpha = 0;
+    const score = new Text({ text: `+${points}`, style: { fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold', fill: 0xffec9b, stroke: { color: 0x243447, width: 3 } } });
+    score.anchor.set(0.5);
+    score.position.set(coin.x, coin.y - 20);
+    score.alpha = 0;
+    this.pickups.addChild(coin, sparkle, score);
+    timeline.set(coin, { alpha: 1 }, 0);
+    timeline.to(coin.scale, { x: 0.35, duration: 0.24, repeat: Math.ceil(at / 0.48), yoyo: true, ease: 'sine.inOut' }, 0);
+    timeline.set(coin, { alpha: 0 }, at);
+    timeline.call(() => this.audio?.play('coin'), [], at);
+    timeline.set(sparkle, { alpha: 1 }, at);
+    timeline.to(sparkle, { alpha: 0, rotation: 0.7, duration: 0.25 }, at);
+    timeline.set(score, { alpha: 1 }, at);
+    timeline.to(score, { y: score.y - 25, alpha: 0, duration: 0.55, ease: 'power1.out' }, at);
   }
 
   private createRoofRun(options: {

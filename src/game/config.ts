@@ -8,6 +8,7 @@ export const UI_CONFIG = {
 } as const;
 
 export const AUDIO_CONFIG = {
+  coin: 0.45,
   master: 1.0,
   catMeow: 0.42,
   classroomAmbience: 0.8,
