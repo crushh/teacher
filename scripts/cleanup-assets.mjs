@@ -33,6 +33,24 @@ const ASSETS = Object.freeze([
   { mode: 'character', source: 'src/assets/classroom/teacher_talk_01.png', output: 'src/assets/cleaned/teacher/teacher_talk_01.png' },
   { mode: 'character', source: 'src/assets/classroom/teacher_talk_02.png', output: 'src/assets/cleaned/teacher/teacher_talk_02.png' },
   { mode: 'character', source: 'src/assets/classroom/teacher_walk_book_01.png', output: 'src/assets/cleaned/teacher/teacher_walk_book_01.png' },
+  {
+    mode: 'character',
+    source: 'src/assets/classroom/teacher_walk_book_cycle.png',
+    output: 'src/assets/cleaned/teacher/teacher_walk_book_cycle.png',
+    minComponentPixels: 24,
+    frameColumns: 4,
+    frameRows: 2,
+    frameBounds: [
+      [90, 5, 330, 435],
+      [108, 5, 305, 435],
+      [135, 5, 320, 435],
+      [105, 5, 325, 435],
+      [90, 5, 350, 435],
+      [108, 5, 305, 435],
+      [135, 5, 320, 435],
+      [90, 5, 340, 435],
+    ],
+  },
   { mode: 'scenery', source: 'src/assets/city/far-city-layer-v1.png', output: 'src/assets/cleaned/city/far-city-layer-v1.png' },
   { mode: 'scenery', source: 'src/assets/city/mid-city-layer-v1.png', output: 'src/assets/cleaned/city/mid-city-layer-v1.png' },
   { mode: 'scenery', source: 'src/assets/city/near-city-layer-v1.png', output: 'src/assets/cleaned/city/near-city-layer-v1.png' },
@@ -62,7 +80,13 @@ for (const asset of selectedAssets) {
     }
 
     const source = decodePng(fs.readFileSync(sourcePath));
-    const cleaned = cleanupImage(source, CLEANUP_CONFIG[asset.mode]);
+    const cleaned = cleanupImage(source, {
+      ...CLEANUP_CONFIG[asset.mode],
+      minComponentPixels: asset.minComponentPixels ?? 0,
+      frameColumns: asset.frameColumns,
+      frameRows: asset.frameRows,
+      frameBounds: asset.frameBounds,
+    });
     const encoded = encodePng(cleaned);
 
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -138,6 +162,14 @@ function cleanupImage(image, config) {
     }
   }
 
+  if (config.frameBounds) {
+    clearOutsideFrameBounds(pixels, image.width, image.height, config.frameColumns, config.frameRows, config.frameBounds);
+  }
+
+  if (config.minComponentPixels > 0) {
+    removeSmallComponents(pixels, image.width, image.height, config.minComponentPixels);
+  }
+
   return {
     width: image.width,
     height: image.height,
@@ -145,6 +177,62 @@ function cleanupImage(image, config) {
     colorType: 6,
     pixels,
   };
+}
+
+function clearOutsideFrameBounds(pixels, width, height, columns, rows, bounds) {
+  const cellWidth = Math.floor(width / columns);
+  const cellHeight = Math.floor(height / rows);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const column = Math.min(columns - 1, Math.floor(x / cellWidth));
+      const row = Math.min(rows - 1, Math.floor(y / cellHeight));
+      const [left, top, right, bottom] = bounds[row * columns + column];
+      const localX = x - column * cellWidth;
+      const localY = y - row * cellHeight;
+      if (localX < left || localX > right || localY < top || localY > bottom) {
+        clearPixel(pixels, (y * width + x) * 4);
+      }
+    }
+  }
+}
+
+function removeSmallComponents(pixels, width, height, minComponentPixels) {
+  const visited = new Uint8Array(width * height);
+  const queue = [];
+
+  for (let start = 0; start < visited.length; start += 1) {
+    if (visited[start] || pixels[start * 4 + 3] === 0) continue;
+
+    const component = [];
+    queue.length = 0;
+    queue.push(start);
+    visited[start] = 1;
+
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const index = queue[cursor];
+      component.push(index);
+      const x = index % width;
+      const y = Math.floor(index / width);
+
+      for (let yOffset = -1; yOffset <= 1; yOffset += 1) {
+        for (let xOffset = -1; xOffset <= 1; xOffset += 1) {
+          if (xOffset === 0 && yOffset === 0) continue;
+          const neighborX = x + xOffset;
+          const neighborY = y + yOffset;
+          if (neighborX < 0 || neighborY < 0 || neighborX >= width || neighborY >= height) continue;
+          const neighbor = neighborY * width + neighborX;
+          if (visited[neighbor] || pixels[neighbor * 4 + 3] === 0) continue;
+          visited[neighbor] = 1;
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    if (component.length < minComponentPixels) {
+      for (const index of component) clearPixel(pixels, index * 4);
+    }
+  }
 }
 
 function findMatteBackground(pixels, width, height, config) {

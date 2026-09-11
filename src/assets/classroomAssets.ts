@@ -14,7 +14,7 @@ import teacherRun02Url from './cleaned/teacher/teacher_run_02.png';
 import teacherTalk01Url from './cleaned/teacher/teacher_talk_01.png';
 import teacherTalk02Url from './cleaned/teacher/teacher_talk_02.png';
 import teacherWalkBookUrl from './cleaned/teacher/teacher_walk_book_01.png';
-import teacherWalkCycleUrl from './classroom/teacher_walk_book_cycle.png';
+import teacherWalkCycleUrl from './cleaned/teacher/teacher_walk_book_cycle.png';
 
 import { configurePixelTexture, removeCheckerboard } from '../game/pixel';
 
@@ -55,7 +55,7 @@ async function loadCutoutTexture(url: string): Promise<Texture> {
 }
 
 export async function loadClassroomAssets(): Promise<ClassroomAssets> {
-  const walkSheet = await loadCutoutTexture(teacherWalkCycleUrl);
+  const walkSheet = await loadTexture(teacherWalkCycleUrl);
   const cellWidth = Math.floor(walkSheet.width / 4);
   const cellHeight = Math.floor(walkSheet.height / 2);
   const walkCycle = Array.from({ length: 8 }, (_, index) => new Texture({
